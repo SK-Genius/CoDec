@@ -1,8 +1,7 @@
 ECHO OFF
 SET comp=8
 
-SET list=LenaColor
-REM SET list=bird circles crosses camera slope text bridge goldhill test test2 Color18V Siemensstern Lena LenaColor
+SET list=bird circles crosses camera slope text bridge goldhill test test2 Color18V Siemensstern Lena LenaColor
 
 FOR %%n IN (%list%) DO (
 	del bin\%%n.dat bin\%%n_.bmp

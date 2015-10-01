@@ -40,6 +40,8 @@ using tFunc3 = gRes(gArg1, gArg2, gArg3);
 using tSize = size_t;
 using tStream = FILE;
 
+static tStream* gLogStream = NULL;
+
 #ifndef _countof
 #	define _countof(a) (sizeof(a) / sizeof(a[0]))
 #endif
@@ -55,15 +57,15 @@ using tStream = FILE;
 		static inline
 		//=============================================================================
 		void Assert(
-			tBool Cond,
-			const tChar8* File,
-			tNat32 Line
+			tBool         Cond,
+			const tChar8* FileName,
+			tNat32        LineNr
 		//=============================================================================
 		) {
 			if (!Cond) {
-				fprintf(stderr, "ERROR %s:%d", File, Line);
-				fflush(stderr);
-				fprintf(stderr, "%d", Line / 0);
+				fprintf(gLogStream, "ERROR %s:%d", FileName, LineNr);
+				fflush(gLogStream);
+				fprintf(gLogStream, "%d", LineNr / 0);
 			}
 		}
 		
@@ -286,8 +288,8 @@ tInt32 Max(
 
 static inline
 //=============================================================================
-tNat32 UsedBits(
-	tNat32 Nat
+tNat64 UsedBits(
+	tNat64 Nat
 //=============================================================================
 ) {
 	auto Bits = 0;
@@ -297,7 +299,7 @@ tNat32 UsedBits(
 	return Bits;
 }
 
-#if 0 // TODO
+#if 0 // TODO: ByteReaderInterface
 using iByteReader = struct {
 	void*                 Env;
 	tFunc1<void*, tNat32> ReadByte;
@@ -348,24 +350,31 @@ void Close (
 }
 #endif
 
-namespace Huffman {
+namespace Huffman { // TODO: Huffman
+	using tCount_NodeIndex = struct {
+		tNat32 Count;
+		tNat32 NodeIndex;
+	};
+	
 	static inline
 	//=============================================================================
 	void Swap(
-		tInt16* A,
-		tInt16* B
+		tCount_NodeIndex* A,
+		tCount_NodeIndex* B
 	//=============================================================================
 	) {
-		*A ^= *B;
-		*B ^= *A;
-		*A ^= *B;
+		auto A_ = (tInt64*)A;
+		auto B_ = (tInt64*)B;
+		*A_ ^= *B_;
+		*B_ ^= *A_;
+		*A_ ^= *B_;
 	}
 	
 	// TODO: vieleicht doch lieber InsertSort statt QuickSort, da das Histogramm schon relative gut sortiert ist???
 	static inline
 	//=============================================================================
 	void InPlaceSort(
-		tInt16* Array,
+		tCount_NodeIndex* Array,
 		tNat32  Count
 	//=============================================================================
 	) {
@@ -373,22 +382,22 @@ namespace Huffman {
 			return;
 		}
 		
-		int Pivot = Array[Count >> 1];
-		auto Low = 0;
-		auto Hight = Count - 1;
+		auto Pivot  = Array[Count >> 1].Count;
+		auto Low   = (tInt32)0;
+		auto Hight = (tInt32)(Count - 1);
 		
-		while (true) {
-			while (Array[Low] < Pivot) { Low   += 1; }
-			while (Array[Hight] > Pivot) { Hight -= 1; }
+		for (;;) {
+			while (Array[Low].Count < Pivot) { Low   += 1; }
+			while (Array[Hight].Count > Pivot) { Hight -= 1; }
 			if (Low == Hight) { break; }
-			if (Array[Low] == Array[Hight]) {
+			if (Array[Low].Count == Array[Hight].Count) {
 				Hight -= 1;
 			} else {
 				Swap(&Array[Low], &Array[Hight]);
 			}
 		}
 		ASSERT(Low == Hight);
-		ASSERT(Low < Count); // termination condition
+		ASSERT(Low < (tInt32)Count); // termination condition
 		InPlaceSort(Array, Low);
 		ASSERT(Count - Low -1 < Count); // termination condition
 		InPlaceSort(&Array[Low + 1], Count - Low - 1);
@@ -396,82 +405,127 @@ namespace Huffman {
 	
 	static inline
 	//=============================================================================
-	void CalculateTree(
-		tInt16* Histogramm,
-		tNat32  Count
+	void CalculateBitCount(
+		tCount_NodeIndex* Histogramm,
+		tNat32            Count
 	//=============================================================================
 	) {
-		InPlaceSort(Histogramm, Count);
-	}
-	
-#	ifdef TEST
-	static inline
-	//=============================================================================
-	void TestSwap(
-	//=============================================================================
-	) {
-		auto A = (tInt16)5;
-		auto B = (tInt16)8;
-		
-		Swap(&A, &B);
-		
-		ASSERT(A == 8);
-		ASSERT(B == 5);
-	}
-	
-	static inline
-	//=============================================================================
-	void TestSort(
-	//=============================================================================
-	) {
-		tInt16 Array[] = {
-			0, // count
+		ASSERT(Count <= (1 << 17))
+		tNat32 ParentNodes[1 << 17] = {};
+		auto Nodes = Histogramm;
+		auto NextNodeIndex = Count;
+		InPlaceSort(Nodes, Count);
+		for (auto N = Count; N --> 0;) {
+			ASSERT(NextNodeIndex < _countof(ParentNodes))
+			ParentNodes[Nodes[0].NodeIndex] = NextNodeIndex;
+			ParentNodes[Nodes[1].NodeIndex] = NextNodeIndex;
+			Nodes[1].Count += Nodes[0].Count;
+			Nodes[1].NodeIndex = NextNodeIndex;
+			Nodes = &Nodes[1]; // remove Nodes[0]
+			NextNodeIndex += 1;
 			
-			1, // count
-			1, // in
-			1, // out
-			
-			2, // count
-			1, 2, // in
-			1, 2, // out
-			
-			2, // count
-			1, 1, // in
-			1, 1, // out
-			
-			2, // count
-			2, 1, // in
-			1, 2, // out
-			
-			5, // count
-			1, 1, 1, 1, 1, // in
-			1, 1, 1, 1, 1, // out
-			
-			9, // count
-			4, 3, 8, 2, 4, 2, 8, 23, 1, // in
-			1, 2, 2, 3, 4, 4, 8, 8, 23 // out
-		};
-		auto Offset = 0;
-		while (Offset < _countof(Array)) {
-			auto Count = Array[Offset];
-			auto Base = Offset + 1;
-			auto BaseRef = Base + Count;
-			InPlaceSort(&Array[Base], Count);
-			for (auto I = Count; I --> 0;) {
-				ASSERT(Array[Base + I] == Array[BaseRef + I]);
+			// insert sort, one round
+			auto A = &Nodes[0];
+			auto B = &Nodes[1];
+			for (auto M = N; M --> 0;) {
+				if (A->Count <= B->Count) { break; }
+				Swap(A, B);
 			}
-			Offset += 2*Count + 1;
+		}
+		
+		for (auto NodeIndex = Count; NodeIndex --> 0;) {
+			auto BitCount = 1;
+			auto ParentNodeIndex = ParentNodes[NodeIndex];
+			while (ParentNodeIndex != 0) {
+				ParentNodeIndex = ParentNodes[ParentNodeIndex];
+				BitCount += 1;
+			}
+			Histogramm[NodeIndex].Count = BitCount;
+			Histogramm[NodeIndex].NodeIndex = 0; // TODO 
 		}
 	}
 	
 	static inline
 	//=============================================================================
-	void Test(
+	void CalculateTree(
+		tCount_NodeIndex* Histogramm,
+		tNat32            Count
 	//=============================================================================
 	) {
-		TestSwap();
-		TestSort();
+		CalculateBitCount(Histogramm, Count);
 	}
+	
+#	ifdef TEST
+		static inline
+		//=============================================================================
+		void TestSwap(
+		//=============================================================================
+		) {
+			tCount_NodeIndex A;
+			tCount_NodeIndex B;
+			
+			A.Count = 5;
+			B.Count = 8;
+			
+			Swap(&A, &B);
+			
+			ASSERT(A.Count == 8);
+			ASSERT(B.Count == 5);
+		}
+		
+		static inline
+		//=============================================================================
+		void TestSort(
+		//=============================================================================
+		) {
+			tCount_NodeIndex Array[] = {
+				{0, 0}, // count
+				
+				{1, 0}, // count
+				{1, 0}, // in
+				{1, 0}, // out
+				
+				{2, 0}, // count
+				{1, 0}, {2, 0}, // in
+				{1, 0}, {2, 0}, // out
+				
+				{2, 0}, // count
+				{1, 0}, {1, 0}, // in
+				{1, 0}, {1, 0}, // out
+				
+				{2, 0}, // count
+				{2, 0}, {1, 0}, // in
+				{1, 0}, {2, 0}, // out
+				
+				{5, 0}, // count
+				{1, 0}, {1, 0}, {1, 0}, {1, 0}, {1, 0}, // in
+				{1, 0}, {1, 0}, {1, 0}, {1, 0}, {1, 0}, // out
+				
+				{9, 0}, // count
+				{4, 0}, {3, 0}, {8, 0}, {2, 0}, {4, 0}, {2, 0}, {8, 0}, {23, 0}, { 1, 0}, // in
+				{1, 0}, {2, 0}, {2, 0}, {3, 0}, {4, 0}, {4, 0}, {8, 0}, { 8, 0}, {23, 0} // out
+			};
+			auto CountIndex = 0;
+			while (CountIndex < _countof(Array)) {
+				auto Count = Array[CountIndex].Count;
+				auto BaseIndex = CountIndex + 1;
+				auto BaseIndexRef = BaseIndex + Count;
+				InPlaceSort(&Array[BaseIndex], Count);
+				for (auto I = Count; I --> 0;) {
+					ASSERT(Array[BaseIndex + I].Count == Array[BaseIndexRef + I].Count);
+				}
+				CountIndex += 2*Count + 1;
+			}
+		}
+		
+		static inline
+		//=============================================================================
+		void Test(
+		//=============================================================================
+		) {
+			TestSwap();
+			TestSort();
+		}
 #	endif
 }
 
@@ -804,6 +858,7 @@ namespace ArithmeticBitStream {
 		tNat32 Count0;
 		tNat32 Count;
 		tNat32 Count0_Old;
+		tInt32 _; // 64 bit alignment
 	};
 	
 	static inline
@@ -1030,9 +1085,9 @@ void WriteNat_(
 ) {
 //	START_CLOCK(WriteNat_);
 	
-	for (auto I = 16; I --> 0;) {
+	for (auto I = (tNat32)16; I --> 0;) {
 		auto Bit = (Value >> I) & 1;
-		WriteBit(BitWriter, Bit);
+		WriteBit(BitWriter, (tNat32)Bit);
 	}
 	
 //	STOP_CLOCK(WriteNat_);
@@ -1297,7 +1352,10 @@ namespace HaarWavelet {
 	
 #	ifdef TEST
 		static inline
-		void Test() {
+		//=============================================================================
+		void Test(
+		//=============================================================================
+		) {
 			tQuad Src;
 			for (Src.A = -4; Src.A < 4; Src.A += 1) {
 				for (Src.B = -4; Src.B < 4; Src.B += 1) {
@@ -1328,6 +1386,7 @@ namespace Layer {
 		tInt16* V; // Vertical   //   |  V  | D | Bottom
 		tInt16* D; // Diagonal   //   +-----+---+
 		tNat32 Pitch;            // Pitch >= SizeXLeft >= SizeXRight; SizeYTop >= SizeYBottom
+		tInt32 _; // 64 bit alignment
 	};
 	
 	static
@@ -1621,8 +1680,8 @@ namespace Layer {
 							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
 							Temp = DeltaQubicWaveletPost2(Last2L_S, Last1L_S, Curr0L_S);
 						}
-						auto V = DesV[(X + PredDist) + Y * DesPitch] - (tInt16)Temp;
-						DesV[(X + PredDist) + Y * DesPitch] = V;
+						auto V = DesV[(X + PredDist) + Y * DesPitch] - Temp;
+						DesV[(X + PredDist) + Y * DesPitch] = (tInt16)V;
 					}
 				}
 				
@@ -1653,12 +1712,12 @@ namespace Layer {
 					TempD = DeltaQubicWaveletPost2(Last2_V, Last1_V, Curr0_V);
 				}
 				{
-					auto H = DesH[X + Y * DesPitch] - (tInt16)TempH;
-					DesH[X + Y * DesPitch] = H;
+					auto H = DesH[X + Y * DesPitch] - TempH;
+					DesH[X + Y * DesPitch] = (tInt16)H;
 				}
 				if (Y < SizeY1) {
-					auto D = DesD[X + Y * DesPitch] - (((tInt16)TempD + DFactor) >> DFactor);
-					DesD[X + Y * DesPitch] = D;
+					auto D = DesD[X + Y * DesPitch] - ((TempD + DFactor) >> DFactor);
+					DesD[X + Y * DesPitch] = (tInt16)D;
 				}
 			}
 		}
@@ -1800,8 +1859,7 @@ namespace Layer {
 						if (X2 + 1 == SizeX) {
 							Arg.A = SrcS[PosSrc];
 							auto Res = HaarWavelet::DeCode(Arg);
-							ASSERT(
-								Res.A >= 0 &&
+							ASSERT(Res.A >= 0 &&
 								Res.B >= 0 &&
 								Res.C >= 0 &&
 								Res.D >= 0
@@ -1933,7 +1991,7 @@ namespace BmpHelper {
 			!fread(&MaskG, sizeof(tNat32), 1, StreamIn) ||
 			!fread(&MaskB, sizeof(tNat32), 1, StreamIn)
 		) {
-			fprintf(stderr, "ERROR: can't read file");
+			fprintf(gLogStream, "ERROR: can't read file");
 			exit(-1);
 		}
 	}
@@ -1981,7 +2039,7 @@ namespace BmpHelper {
 		
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto RowSize = (tSize)(2*SizeX + 3) & (~3);
-		auto Row = (tNat16*)malloc(RowSize); // TODO: FixSize row to skip malloc
+		auto Row = (tNat16*)malloc(RowSize); // TODO: use FixSize row to skip malloc
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*SizeX + X;
@@ -2017,7 +2075,7 @@ namespace BmpHelper {
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)((3*SizeX + 3) & (~3));
-		auto Row = (tNat8*)malloc(RowSize); // TODO: FixSize row to skip malloc
+		auto Row = (tNat8*)malloc(RowSize); // TODO: use FixSize row to skip malloc
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			auto I = 0;
 			for (auto X = 0; X < SizeX; X += 1) {
@@ -2068,7 +2126,7 @@ namespace BmpHelper {
 		
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto RowSize = (tSize)(4*SizeX);
-		auto Row = (tNat32*)malloc(RowSize); // TODO: FixSize row to skip malloc
+		auto Row = (tNat32*)malloc(RowSize); // TODO: use FixSize row to skip malloc
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*SizeX + X;
@@ -2109,7 +2167,7 @@ namespace BmpHelper {
 		auto MaskB = Mask[2] = 0x000000FFu; // B
 		auto MaskA = ~(MaskR | MaskG | MaskB);
 		if (!fwrite(&Mask, sizeof(Mask), 1, StreamOut)) {
-			fprintf(stderr, "ERROR: fail writing to output!!!");
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
 			exit(-1);
 		}
 		
@@ -2121,7 +2179,7 @@ namespace BmpHelper {
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)(4*SizeX);
-		auto Row = (tNat32*)malloc(RowSize); // TODO: FixSize row to skip malloc
+		auto Row = (tNat32*)malloc(RowSize); // TODO: use FixSize row to skip malloc
 		for (auto Y = 0; Y < BmpInfoHeader.SizeY; Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*Pitch + X;
@@ -2562,29 +2620,15 @@ namespace HilbertCurve {
 #	endif
 }
 
-#if 0
-	// TODO: Funktioniert nicht! Wieso???
-#	if 1
-		const tFunc1<iBitReader, tNat64, tNat64> ReadNat  = FibonacciCode::Read;
-		const tFunc1<iBitReader, tNat64, tNat64> WriteNat = FibonacciCode::Write;
-#	elif 1
-		const tFunc1<iBitReader, tNat64, tNat64> ReadNat  = EliasGammaCode::Read;
-		const tFunc1<iBitReader, tNat64, tNat64> WriteNat = EliasGammaCode::Write;
-#	else
-		const tFunc1<iBitReader, tNat64, tNat64> ReadNat  = ReadNat_;
-		const tFunc1<iBitReader, tNat64, tNat64> WriteNat = WriteNat_;
-#	endif
+#if 1
+#	define ReadNat(BitReader)       FibonacciCode::Read(BitReader)
+#	define WriteNat(BitWriter, Nat) FibonacciCode::Write((BitWriter), (Nat))
+#elif 0
+#	define ReadNat(BitReader)       EliasGammaCode::Read(BitReader)
+#	define WriteNat(BitWriter, Nat) EliasGammaCode::Write((BitWriter), (Nat))
 #else
-#	if 1
-#		define ReadNat(BitReader)       FibonacciCode::Read(BitReader)
-#		define WriteNat(BitWriter, Nat) FibonacciCode::Write((BitWriter), (Nat))
-#	elif 0
-#		define ReadNat(BitReader)       EliasGammaCode::Read(BitReader)
-#		define WriteNat(BitWriter, Nat) EliasGammaCode::Write((BitWriter), (Nat))
-#	else
-#		define ReadNat(BitReader)       ReadNat_(BitReader)
-#		define WriteNat(BitWriter, Nat) WriteNat_((BitWriter), (Nat))
-#	endif
+#	define ReadNat(BitReader)       ReadNat_(BitReader)
+#	define WriteNat(BitWriter, Nat) WriteNat_((BitWriter), (Nat))
 #endif
 
 #if 1
@@ -2681,19 +2725,19 @@ void WriteLayer(
 	
 	Close(&BitWriterInterface);
 	
-	printf("\n\n");
-	printf("%d x %d\n", SizeX, SizeY);
+	fprintf(gLogStream, "\n\n");
+	fprintf(gLogStream, "%d x %d\n", SizeX, SizeY);
 	for (auto Value = 0; Value < 1<<15; Value += 1) {
 		auto Count = HistValues[Value];
 		if (Count > 0) {
-			printf("V %d %d\n", Value, Count);
+			fprintf(gLogStream, "V %d %d\n", Value, Count);
 		}
 	}
-	printf("--\n");
+	fprintf(gLogStream, "--\n");
 	for (auto Bits = 0; Bits < 16; Bits += 1) {
 		auto Count = HistZeros[Bits];
 		if (Count > 0) {
-			printf("Z %d %d\n", Bits, Count);
+			fprintf(gLogStream, "Z %d %d\n", Bits, Count);
 		}
 	}
 	
@@ -2780,31 +2824,31 @@ void EnCode(
 	
 	char MagicString[2];
 	if (!fread(&MagicString, sizeof(MagicString), 1, StreamIn)) {
-		fprintf(stderr, "ERROR: can't read File");
+		fprintf(gLogStream, "ERROR: can't read File");
 		exit(-1);
 	}
 	if (
 		MagicString[0] != 'B' ||
 		MagicString[1] != 'M'
 	) {
-		fprintf(stderr, "ERROR: wrong MagicString %.2s", MagicString);
+		fprintf(gLogStream, "ERROR: wrong MagicString %.2s", MagicString);
 		exit(-1);
 	}
 	
 	BmpHelper::tFileHeader BmpFileHeader;
 	if (!fread(&BmpFileHeader, sizeof(BmpHelper::tFileHeader), 1, StreamIn)) {
-		fprintf(stderr, "ERROR: can't read file");
+		fprintf(gLogStream, "ERROR: can't read file");
 		exit(-1);
 	}
 	
 	BmpHelper::tInfoHeader BmpInfoHeader;
 	if (!fread(&BmpInfoHeader, sizeof(BmpHelper::tInfoHeader), 1, StreamIn)) {
-		fprintf(stderr, "ERROR: can't read file");
+		fprintf(gLogStream, "ERROR: can't read file");
 		exit(-1);
 	}
 	
 	if (BmpInfoHeader.HeaderSize != 40) {
-		fprintf(stderr, "Invalid fileformat");
+		fprintf(gLogStream, "Invalid fileformat");
 		exit(-1);
 	}
 	
@@ -2834,7 +2878,7 @@ void EnCode(
 	if (BmpInfoHeader.BitCount == 32) {
 		BmpHelper::GetLayerFromBmp32(StreamIn, BmpInfoHeader, &Layers[0][InitLevel], &Layers[1][InitLevel], &Layers[2][InitLevel], &Layers[3][InitLevel]);
 	} else {
-		fprintf(stderr, "Invalid fileformat");
+		fprintf(gLogStream, "Invalid fileformat");
 		exit(-1);
 	}
 	
@@ -2968,7 +3012,7 @@ void DeCode(
 		MagicString[0] = 'B';
 		MagicString[1] = 'M';
 		if (!fwrite(&MagicString, sizeof(MagicString), 1, StreamOut)) {
-			fprintf(stderr, "ERROR: fail writing to output!!!");
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
 			exit(-1);
 		}
 		
@@ -2977,7 +3021,7 @@ void DeCode(
 		ASSERT(BmpFileHeader.Offset == 54);
 		BmpFileHeader.Size = BmpFileHeader.Offset + 12 + 4*SizeX*SizeY;
 		if (!fwrite(&BmpFileHeader, sizeof(BmpFileHeader), 1, StreamOut)) {
-			fprintf(stderr, "ERROR: fail writing to output!!!");
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
 			exit(-1);
 		}
 		
@@ -2990,7 +3034,7 @@ void DeCode(
 		ASSERT(BmpInfoHeader.HeaderSize == 40);
 		BmpInfoHeader.SizeImage = 4*SizeX*SizeY;
 		if (!fwrite(&BmpInfoHeader, sizeof(BmpInfoHeader), 1, StreamOut)) {
-			fprintf(stderr, "ERROR: fail writing to output!!!");
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
 			exit(-1);
 		}
 		
@@ -3023,14 +3067,19 @@ int main(
 ) {
 	START_CLOCK(main);
 	
+	gLogStream = stderr;
+	
 	FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
 	
 #	ifdef TEST
-		if (ArgCount > 1 && strcmp(Args[1], "-t") == 0) {
+		if (ArgCount > 1 && strncmp(Args[1], "-t", 2) == 0) {
+			
 			Test();
 			if (ArgCount == 2) {
 				exit(-1);
 			}
+			ArgCount -= 1;
+			Args = &Args[1];
 		}
 #	endif
 	
@@ -3046,7 +3095,7 @@ int main(
 		
 		StreamIn = fopen(FileInName, "rb");
 		if (!StreamIn) {
-			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+			fprintf(gLogStream, "ERROR: File '%s' not found!!!", FileInName);
 			exit(-1);
 		}
 	}
@@ -3057,7 +3106,7 @@ int main(
 		
 		StreamOut = fopen(FileInName, "wb");
 		if (!StreamIn) {
-			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+			fprintf(gLogStream, "ERROR: File '%s' not found!!!", FileInName);
 			exit(-1);
 		}
 	}
@@ -3079,7 +3128,7 @@ int main(
 #	ifdef VS
 		PRINT_CLOCKS(fopen("C:\\Projekte\\ImgCodec2015\\bin\\timer.txt", "wb"));
 #	else
-		PRINT_CLOCKS(stderr);
+		PRINT_CLOCKS(gLogStream);
 #	endif
 	return 0;
 }
