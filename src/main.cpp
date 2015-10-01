@@ -3023,53 +3023,57 @@ int main(
 ) {
 	START_CLOCK(main);
 	
+	FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
+	
 #	ifdef TEST
-		Test();
-#	else
-	
-		FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
-	
-		if (ArgCount < 2) {
-			printf("use -eN for encode or -d for decode");
-			exit(-1);
-		}
-	
-		auto Flag = Args[1];
-		auto StreamIn = stdin; // default
-		if (ArgCount > 2) {
-			auto FileInName = Args[2];
-		
-			StreamIn = fopen(FileInName, "rb");
-			if (!StreamIn) {
-				fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+		if (ArgCount > 1 && strcmp(Args[1], "-t") == 0) {
+			Test();
+			if (ArgCount == 2) {
 				exit(-1);
 			}
-		}
-	
-		auto StreamOut = stdout; // default
-		if (ArgCount > 3) {
-			auto FileInName = Args[3];
-		
-			StreamOut = fopen(FileInName, "wb");
-			if (!StreamIn) {
-				fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
-				exit(-1);
-			}
-		}
-	
-		if (strncmp(Flag, "-e", 2) == 0) {
-			BufferdStream::tWriter BufferdStreamOut;
-			BufferdStream::Init(&BufferdStreamOut, StreamOut);
-			EnCode(StreamIn, &BufferdStreamOut, atoi(&Flag[2]));
-			BufferdStream::Close(&BufferdStreamOut);
-		} else
-		if (strncmp(Flag, "-d", 2) == 0) {
-			BufferdStream::tReader BufferdStreamIn;
-			BufferdStream::Init(&BufferdStreamIn, StreamIn);
-			DeCode(&BufferdStreamIn, StreamOut);
-			BufferdStream::Close(&BufferdStreamIn);
 		}
 #	endif
+	
+	if (ArgCount < 2) {
+		printf("use -eN for encode or -d for decode");
+		exit(-1);
+	}
+	
+	auto Flag = Args[1];
+	auto StreamIn = stdin; // default
+	if (ArgCount > 2) {
+		auto FileInName = Args[2];
+		
+		StreamIn = fopen(FileInName, "rb");
+		if (!StreamIn) {
+			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+			exit(-1);
+		}
+	}
+	
+	auto StreamOut = stdout; // default
+	if (ArgCount > 3) {
+		auto FileInName = Args[3];
+		
+		StreamOut = fopen(FileInName, "wb");
+		if (!StreamIn) {
+			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+			exit(-1);
+		}
+	}
+	
+	if (strncmp(Flag, "-e", 2) == 0) {
+		BufferdStream::tWriter BufferdStreamOut;
+		BufferdStream::Init(&BufferdStreamOut, StreamOut);
+		EnCode(StreamIn, &BufferdStreamOut, atoi(&Flag[2]));
+		BufferdStream::Close(&BufferdStreamOut);
+	} else
+	if (strncmp(Flag, "-d", 2) == 0) {
+		BufferdStream::tReader BufferdStreamIn;
+		BufferdStream::Init(&BufferdStreamIn, StreamIn);
+		DeCode(&BufferdStreamIn, StreamOut);
+		BufferdStream::Close(&BufferdStreamIn);
+	}
 	
 	STOP_CLOCK(main);
 #	ifdef VS
