@@ -6,6 +6,7 @@
 // ==========
 // - Huffman vs Fibonacci
 // - Parallel
+// - ContainerFormat
 
 using tBool = bool;
 
@@ -347,19 +348,146 @@ void Close (
 }
 #endif
 
+namespace Huffman {
+	static inline
+	//=============================================================================
+	void Swap(
+		tInt16* A,
+		tInt16* B
+	//=============================================================================
+	) {
+		*A ^= *B;
+		*B ^= *A;
+		*A ^= *B;
+	}
+	
+	// TODO: vieleicht doch lieber InsertSort statt QuickSort, da das Histogramm schon relative gut sortiert ist???
+	static inline
+	//=============================================================================
+	void InPlaceSort(
+		tInt16* Array,
+		tNat32  Count
+	//=============================================================================
+	) {
+		if (Count <= 1) {
+			return;
+		}
+		
+		int Pivot = Array[Count >> 1];
+		auto Low = 0;
+		auto Hight = Count - 1;
+		
+		while (true) {
+			while (Array[Low] < Pivot) { Low   += 1; }
+			while (Array[Hight] > Pivot) { Hight -= 1; }
+			if (Low == Hight) { break; }
+			if (Array[Low] == Array[Hight]) {
+				Hight -= 1;
+			} else {
+				Swap(&Array[Low], &Array[Hight]);
+			}
+		}
+		ASSERT(Low == Hight);
+		ASSERT(Low < Count); // termination condition
+		InPlaceSort(Array, Low);
+		ASSERT(Count - Low -1 < Count); // termination condition
+		InPlaceSort(&Array[Low + 1], Count - Low - 1);
+	}
+	
+	static inline
+	//=============================================================================
+	void CalculateTree(
+		tInt16* Histogramm,
+		tNat32  Count
+	//=============================================================================
+	) {
+		InPlaceSort(Histogramm, Count);
+	}
+	
+#	ifdef TEST
+	static inline
+	//=============================================================================
+	void TestSwap(
+	//=============================================================================
+	) {
+		auto A = (tInt16)5;
+		auto B = (tInt16)8;
+		
+		Swap(&A, &B);
+		
+		ASSERT(A == 8);
+		ASSERT(B == 5);
+	}
+	
+	static inline
+	//=============================================================================
+	void TestSort(
+	//=============================================================================
+	) {
+		tInt16 Array[] = {
+			0, // count
+			
+			1, // count
+			1, // in
+			1, // out
+			
+			2, // count
+			1, 2, // in
+			1, 2, // out
+			
+			2, // count
+			1, 1, // in
+			1, 1, // out
+			
+			2, // count
+			2, 1, // in
+			1, 2, // out
+			
+			5, // count
+			1, 1, 1, 1, 1, // in
+			1, 1, 1, 1, 1, // out
+			
+			9, // count
+			4, 3, 8, 2, 4, 2, 8, 23, 1, // in
+			1, 2, 2, 3, 4, 4, 8, 8, 23 // out
+		};
+		auto Offset = 0;
+		while (Offset < _countof(Array)) {
+			auto Count = Array[Offset];
+			auto Base = Offset + 1;
+			auto BaseRef = Base + Count;
+			InPlaceSort(&Array[Base], Count);
+			for (auto I = Count; I --> 0;) {
+				ASSERT(Array[Base + I] == Array[BaseRef + I]);
+			}
+			Offset += 2*Count + 1;
+		}
+	}
+	
+	static inline
+	//=============================================================================
+	void Test(
+	//=============================================================================
+	) {
+		TestSwap();
+		TestSort();
+	}
+#	endif
+}
+
 namespace BufferdStream {
 	using tReader = struct {
 		tNat8    Buffer[512];
 		tStream* Stream;
 		tNat32   Pos;
-		tNat32   _;
+		tNat32   _; // aligment
 	};
 	
 	using tWriter = struct {
 		tNat8    Buffer[512];
 		tStream* Stream;
 		tNat32   Pos;
-		tNat32   _;
+		tNat32   _; // aligment
 	};
 	
 	static inline
@@ -2881,9 +3009,11 @@ void DeCode(
 		HaarWavelet::Test();
 		HilbertCurve::Test();
 		FibonacciCode::Test();
-//TODO		OldStuff::Test();
+		Huffman::Test();
+//TODO		Layer::Test();
 	}
 #endif
+
 
 //=============================================================================
 int main(
@@ -2895,50 +3025,51 @@ int main(
 	
 #	ifdef TEST
 		Test();
+#	else
+	
+		FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
+	
+		if (ArgCount < 2) {
+			printf("use -eN for encode or -d for decode");
+			exit(-1);
+		}
+	
+		auto Flag = Args[1];
+		auto StreamIn = stdin; // default
+		if (ArgCount > 2) {
+			auto FileInName = Args[2];
+		
+			StreamIn = fopen(FileInName, "rb");
+			if (!StreamIn) {
+				fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+				exit(-1);
+			}
+		}
+	
+		auto StreamOut = stdout; // default
+		if (ArgCount > 3) {
+			auto FileInName = Args[3];
+		
+			StreamOut = fopen(FileInName, "wb");
+			if (!StreamIn) {
+				fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
+				exit(-1);
+			}
+		}
+	
+		if (strncmp(Flag, "-e", 2) == 0) {
+			BufferdStream::tWriter BufferdStreamOut;
+			BufferdStream::Init(&BufferdStreamOut, StreamOut);
+			EnCode(StreamIn, &BufferdStreamOut, atoi(&Flag[2]));
+			BufferdStream::Close(&BufferdStreamOut);
+		} else
+		if (strncmp(Flag, "-d", 2) == 0) {
+			BufferdStream::tReader BufferdStreamIn;
+			BufferdStream::Init(&BufferdStreamIn, StreamIn);
+			DeCode(&BufferdStreamIn, StreamOut);
+			BufferdStream::Close(&BufferdStreamIn);
+		}
 #	endif
-	
-	FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
-	
-	if (ArgCount < 2) {
-		printf("use -eN for encode or -d for decode");
-		exit(-1);
-	}
-	
-	auto Flag = Args[1];
-	auto StreamIn = stdin; // default
-	if (ArgCount > 2) {
-		auto FileInName = Args[2];
-		
-		StreamIn = fopen(FileInName, "rb");
-		if (!StreamIn) {
-			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
-			exit(-1);
-		}
-	}
-	
-	auto StreamOut = stdout; // default
-	if (ArgCount > 3) {
-		auto FileInName = Args[3];
-		
-		StreamOut = fopen(FileInName, "wb");
-		if (!StreamIn) {
-			fprintf(stderr, "ERROR: File '%s' not found!!!", FileInName);
-			exit(-1);
-		}
-	}
-	
-	if (strncmp(Flag, "-e", 2) == 0) {
-		BufferdStream::tWriter BufferdStreamOut;
-		BufferdStream::Init(&BufferdStreamOut, StreamOut);
-		EnCode(StreamIn, &BufferdStreamOut, atoi(&Flag[2]));
-		BufferdStream::Close(&BufferdStreamOut);
-	} else
-	if (strncmp(Flag, "-d", 2) == 0) {
-		BufferdStream::tReader BufferdStreamIn;
-		BufferdStream::Init(&BufferdStreamIn, StreamIn);
-		DeCode(&BufferdStreamIn, StreamOut);
-		BufferdStream::Close(&BufferdStreamIn);
-	}
 	
 	STOP_CLOCK(main);
 #	ifdef VS
