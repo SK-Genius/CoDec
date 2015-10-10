@@ -141,11 +141,11 @@ tNat64 UsedBits(
 }
 
 //=============================================================================
-template <typename t>
+template <typename g>
 static inline
 void Swap(
-	t* A, // IN-OUT
-	t* B  // IN OUT
+	g* A, // IN-OUT
+	g* B  // IN OUT
 //=============================================================================
 ) {
 	auto Temp = *A;
@@ -173,10 +173,10 @@ g& tArray<g>::operator[] (
 }
 
 //=============================================================================
-template<typename t>
+template<typename g>
 static inline
-tArray<t> Take(
-	tArray<t> Array,
+tArray<g> Take(
+	tArray<g> Array,
 	tNat32    Count
 //=============================================================================
 ) {
@@ -185,10 +185,10 @@ tArray<t> Take(
 }
 
 //=============================================================================
-template<typename t>
+template<typename g>
 static inline
-tArray<t> Skip(
-	tArray<t> Array,
+tArray<g> Skip(
+	tArray<g> Array,
 	tNat32    Count
 //=============================================================================
 ) {
@@ -199,11 +199,11 @@ tArray<t> Skip(
 }
 
 //=============================================================================
-template<typename t>
+template<typename g>
 static inline
 void InPlaceQuickSort(
-	tArray<t>            Nodes,
-	tFunc2<t, t, tInt32>* Comp
+	tArray<g>            Nodes,
+	tFunc2<g, g, tInt32>* Comp
 //=============================================================================
 ) {
 	if (Nodes.Size <= 1) {
@@ -625,16 +625,14 @@ namespace Huffman { // TODO: Huffman
 		HeapFree(Counts);
 	}
 	
+
 	//=============================================================================
 	static inline
-	void CalculateTree(
-		tArray<tNat32>& Histogramm,
-		tArray<tNat32>& BitCounts,  // OUT
-		tArray<tNat32>& BitsArray   // OUT
+	void CalculateBits(
+		tArray<tNat32>& BitCounts,
+		tArray<tNat32>& BitsArray  // OUT
 	//=============================================================================
 	) {
-		CalculateBitCount(Histogramm, BitCounts);
-		
 		auto Bits = 0;
 		auto BitCount = 0;
 		for (auto NodeId = BitCounts.Size; NodeId --> 0;) {
@@ -670,12 +668,13 @@ namespace Huffman { // TODO: Huffman
 			tArray<tNat32> InHistogramm = AsArray(Histogram);
 			tArray<tNat32> OutCounts    = AsArray(BitCountsRes);
 			tArray<tNat32> OutBits      = AsArray(BitsRes);
-			CalculateTree(InHistogramm, OutCounts, OutBits);
 			
+			CalculateBitCount(InHistogramm, OutCounts);
 			for (auto I = _countof(Histogram); I --> 0;) {
 				ASSERT(BitCountsRes[I] == BitCountsRef[I]);
 			}
 			
+			CalculateBits(OutCounts, OutBits);
 			for (auto I = _countof(Histogram); I --> 0;) {
 				ASSERT(BitsRes[I] == BitsRef[I]);
 			}
