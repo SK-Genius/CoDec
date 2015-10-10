@@ -1,6 +1,10 @@
-#include <stdio.h> // fopen(...), fclose(...), fread(...), fwrite(...), fflush(...), printf(...), fprintf(...)
+#include <stdio.h> // fopen(...), fclose(...), fread(...), fwrite(...), fflush(...), fprintf(...)
 #include <string.h> // strncmp(...)
 #include <stdlib.h> // exit(...)
+
+#ifdef VS
+#	include <malloc.h> // alloca(...)
+#endif
 
 // TODO-List:
 // ==========
@@ -54,8 +58,8 @@ static tStream* gLogStream = NULL;
 	
 	namespace Debug {
 		
-		static inline
 		//=============================================================================
+		static inline
 		void Assert(
 			tBool         Cond,
 			const tChar8* FileName,
@@ -72,6 +76,226 @@ static tStream* gLogStream = NULL;
 	}
 #else
 #	define ASSERT(Cond)
+#endif
+
+//=============================================================================
+static inline
+tInt32 Abs(
+	tInt32 Value
+//=============================================================================
+) {
+	return (Value < 0) ? -Value : Value;
+}
+
+//=============================================================================
+static inline
+tInt32 Sign(
+	tInt64 Value
+//=============================================================================
+) {
+	if (Value == 0) { return 0; }
+	return (tNat32)(Value >> 63);
+}
+
+//=============================================================================
+static inline
+tInt32 Min(
+	tInt32 A,
+	tInt32 B
+//=============================================================================
+) {
+	return (A < B) ? A : B;
+}
+
+//=============================================================================
+static inline
+tNat64 Min(
+	tNat64 A,
+	tNat64 B
+//=============================================================================
+) {
+	return (A < B) ? A : B;
+}
+
+//=============================================================================
+static inline
+tInt32 Max(
+	tInt32 A,
+	tInt32 B
+//=============================================================================
+) {
+	return (A > B) ? A : B;
+}
+
+//=============================================================================
+static inline
+tNat64 UsedBits(
+	tNat64 Nat
+//=============================================================================
+) {
+	auto Bits = 0;
+	for (auto Temp = Nat; Temp > 0; Temp >>= 1) {
+		Bits += 1;
+	}
+	return Bits;
+}
+
+//=============================================================================
+template <typename t>
+static inline
+void Swap(
+	t* A, // IN-OUT
+	t* B  // IN OUT
+//=============================================================================
+) {
+	auto Temp = *A;
+	*A = *B;
+	*B = Temp;
+}
+
+template <typename g>
+struct tArray sealed {
+	tNat64 Size;
+	g*     Values;
+	
+	g& operator[] (const tNat64);
+};
+
+//=============================================================================
+template <typename g>
+inline
+g& tArray<g>::operator[] (
+	const tNat64 Index
+//=============================================================================
+) {
+	ASSERT(0 <= Index && Index < Size);
+	return this->Values[Index];
+}
+
+//=============================================================================
+template<typename t>
+static inline
+tArray<t> Take(
+	tArray<t> Array,
+	tNat32    Count
+//=============================================================================
+) {
+	Array.Size = Min(Array.Size, Count);
+	return Array;
+}
+
+//=============================================================================
+template<typename t>
+static inline
+tArray<t> Skip(
+	tArray<t> Array,
+	tNat32    Count
+//=============================================================================
+) {
+	auto Delta = Min(Array.Size, Count);
+	Array.Values += Delta;
+	Array.Size   -= Delta;
+	return Array;
+}
+
+//=============================================================================
+template<typename t>
+static inline
+void InPlaceQuickSort(
+	tArray<t>            Nodes,
+	tFunc2<t, t, tInt32>* Comp
+//=============================================================================
+) {
+	if (Nodes.Size <= 1) {
+		return;
+	}
+	
+	auto Pivot  = Nodes[Nodes.Size >> 1];
+	auto Low   = (tInt32)0;
+	auto Hight = (tInt32)(Nodes.Size - 1);
+	
+	for (;;) {
+		while (Comp(Nodes[Low  ], Pivot) > 0 && Low != Hight) { Low   += 1; }
+		while (Comp(Nodes[Hight], Pivot) < 0 && Low != Hight) { Hight -= 1; }
+		if (Low == Hight) { break; }
+		if (Comp(Nodes[Low], Nodes[Hight]) == 0) {
+			Hight -= 1;
+		} else {
+			Swap(&Nodes[Low], &Nodes[Hight]);
+		}
+	}
+	ASSERT(Low == Hight);
+	InPlaceQuickSort(Take(Nodes, Low), Comp);
+	InPlaceQuickSort(Skip(Nodes, Low + 1), Comp);
+}
+
+#define AsArray(LocalArray) { _countof(LocalArray), LocalArray }
+
+#ifdef TEST
+	//=============================================================================
+	static inline
+	void TestSwap(
+	//=============================================================================
+	) {
+		auto A = (tNat32)5;
+		auto B = (tNat32)8;
+		
+		Swap(&A, &B);
+		
+		ASSERT(A == 8);
+		ASSERT(B == 5);
+	}
+	
+	//=============================================================================
+	static inline
+	void TestSort(
+	//=============================================================================
+	) {
+		tNat32 Buffer[] = {
+			0, // count
+			
+			1, // count
+			1, // in
+			1, // out
+			
+			2, // count
+			1, 2, // in
+			2, 1, // out
+			
+			2, // count
+			1, 1, // in
+			1, 1, // out
+			
+			2, // count
+			2, 1, // in
+			2, 1, // out
+			
+			5, // count
+			4, 8, 1, 1, 4, // in
+			8, 4, 4, 1, 1, // out
+			
+			5, // count
+			1, 1, 1, 1, 1, // in
+			1, 1, 1, 1, 1, // out
+			
+			9, // count
+			4, 3, 8, 2, 4, 2, 8, 23, 1, // in
+			23, 8, 8, 4, 4, 3, 2, 2, 1 // out
+		};
+		tArray<tNat32> Array = AsArray(Buffer);
+		auto CountIndex = (tNat32)0;
+		auto Comp = (tFunc2<tNat32, tNat32, tInt32>*) [](tNat32 A, tNat32 B) { return (tInt32)A - (tInt32)B; };
+		while (CountIndex < Array.Size) {
+			auto Count = Array[CountIndex];
+			auto T = Take(Skip(Array, CountIndex + 1        ), Count);
+			auto R = Take(Skip(Array, CountIndex + 1 + Count), Count);
+			InPlaceQuickSort(T, Comp);
+			for (auto I = Count; I --> 0;) {
+				ASSERT(T[I] == R[I]);
+			}
+			CountIndex += 2*Count + 1;
+		}
+	}
 #endif
 
 #ifdef TIMER
@@ -157,8 +381,8 @@ static tStream* gLogStream = NULL;
 			}
 #		endif
 		
-		static inline
 		//=============================================================================
+		static inline
 		void Start(
 			tNat32 Id
 		//=============================================================================
@@ -166,8 +390,8 @@ static tStream* gLogStream = NULL;
 			gClocks[Id].Begin = clock();
 		}
 		
-		static inline
 		//=============================================================================
+		static inline
 		void Stop(
 			tNat32 Id
 		//=============================================================================
@@ -179,8 +403,8 @@ static tStream* gLogStream = NULL;
 			}
 		}
 		
-		static inline
 		//=============================================================================
+		static inline
 		void print(
 			tStream* Stream
 		//=============================================================================
@@ -257,46 +481,27 @@ static tStream* gLogStream = NULL;
 #	define PRINT_CLOCKS(stream)
 #endif
 
-static inline
 //=============================================================================
-tInt32 Abs(
-	tInt32 Value
+template <typename g>
+tArray<g> HeapAlloc(
+	tNat64 Count
 //=============================================================================
 ) {
-	return (Value < 0) ? -Value : Value;
+	tArray<g> Result;
+	Result.Values = (g*)malloc(Count*sizeof(g));
+	Result.Size = Count;
+	return Result;
 }
 
-static inline
 //=============================================================================
-tInt32 Min(
-	tInt32 A,
-	tInt32 B
-//=============================================================================
-) {
-	return (A < B) ? A : B;
-}
-
-static inline
-//=============================================================================
-tInt32 Max(
-	tInt32 A,
-	tInt32 B
+template <typename g>
+void HeapFree(
+	tArray<g> Array
 //=============================================================================
 ) {
-	return (A > B) ? A : B;
-}
-
-static inline
-//=============================================================================
-tNat64 UsedBits(
-	tNat64 Nat
-//=============================================================================
-) {
-	auto Bits = 0;
-	for (auto Temp = Nat; Temp > 0; Temp >>= 1) {
-		Bits += 1;
-	}
-	return Bits;
+	free(Array.Values);
+	Array.Values = NULL;
+	Array.Size = 0;
 }
 
 #if 0 // TODO: ByteReaderInterface
@@ -356,175 +561,134 @@ namespace Huffman { // TODO: Huffman
 		tNat32 NodeIndex;
 	};
 	
+	// TODO: why i need references ??? (compiler bug?)
+	//=============================================================================
 	static inline
-	//=============================================================================
-	void Swap(
-		tCount_NodeIndex* A,
-		tCount_NodeIndex* B
-	//=============================================================================
-	) {
-		auto A_ = (tInt64*)A;
-		auto B_ = (tInt64*)B;
-		*A_ ^= *B_;
-		*B_ ^= *A_;
-		*A_ ^= *B_;
-	}
-	
-	// TODO: vieleicht doch lieber InsertSort statt QuickSort, da das Histogramm schon relative gut sortiert ist???
-	static inline
-	//=============================================================================
-	void InPlaceSort(
-		tCount_NodeIndex* Array,
-		tNat32  Count
-	//=============================================================================
-	) {
-		if (Count <= 1) {
-			return;
-		}
-		
-		auto Pivot  = Array[Count >> 1].Count;
-		auto Low   = (tInt32)0;
-		auto Hight = (tInt32)(Count - 1);
-		
-		for (;;) {
-			while (Array[Low].Count < Pivot) { Low   += 1; }
-			while (Array[Hight].Count > Pivot) { Hight -= 1; }
-			if (Low == Hight) { break; }
-			if (Array[Low].Count == Array[Hight].Count) {
-				Hight -= 1;
-			} else {
-				Swap(&Array[Low], &Array[Hight]);
-			}
-		}
-		ASSERT(Low == Hight);
-		ASSERT(Low < (tInt32)Count); // termination condition
-		InPlaceSort(Array, Low);
-		ASSERT(Count - Low -1 < Count); // termination condition
-		InPlaceSort(&Array[Low + 1], Count - Low - 1);
-	}
-	
-	static inline
-	//=============================================================================
 	void CalculateBitCount(
-		tCount_NodeIndex* Histogramm,
-		tNat32            Count
+		tArray<tNat32>& SortedHistogramm,
+		tArray<tNat32>& BitCounts         // OUT
 	//=============================================================================
 	) {
-		ASSERT(Count <= (1 << 17))
-		tNat32 ParentNodes[1 << 17] = {};
-		auto Nodes = Histogramm;
-		auto NextNodeIndex = Count;
-		InPlaceSort(Nodes, Count);
-		for (auto N = Count; N --> 0;) {
-			ASSERT(NextNodeIndex < _countof(ParentNodes))
-			ParentNodes[Nodes[0].NodeIndex] = NextNodeIndex;
-			ParentNodes[Nodes[1].NodeIndex] = NextNodeIndex;
-			Nodes[1].Count += Nodes[0].Count;
-			Nodes[1].NodeIndex = NextNodeIndex;
-			Nodes = &Nodes[1]; // remove Nodes[0]
-			NextNodeIndex += 1;
-			
-			// insert sort, one round
-			auto A = &Nodes[0];
-			auto B = &Nodes[1];
-			for (auto M = N; M --> 0;) {
-				if (A->Count <= B->Count) { break; }
-				Swap(A, B);
+		ASSERT(SortedHistogramm.Size <= (1 << 17))
+		
+		// init
+		auto HistogrammSize = SortedHistogramm.Size;
+		auto NodeCount = 2*HistogrammSize - 1;
+		
+		auto NodeIds     = HeapAlloc<tNat32>(NodeCount);
+		auto ParentNodes = HeapAlloc<tNat32>(NodeCount);
+		auto Counts      = HeapAlloc<tNat32>(NodeCount);
+		
+		for (auto NodeId = NodeCount; NodeId --> 0;) {
+			NodeIds[NodeId] = (tNat32)NodeId;
+			ParentNodes[NodeId] = 0;
+			Counts[NodeId] = (NodeId < HistogrammSize) ? SortedHistogramm[NodeId] : 0;
+		}
+		
+		{ // build tree
+			auto I = (tNat32)0;
+			auto NewNodeId = (tNat32)HistogrammSize;
+			while (I <= NodeCount - 2) {
+				ASSERT(NewNodeId <= NodeCount)
+				auto NodeIdA = NodeIds[I + 0];
+				auto NodeIdB = NodeIds[I + 1];
+				ParentNodes[NodeIdA] = NewNodeId;
+				ParentNodes[NodeIdB] = NewNodeId;
+				
+				Counts[NewNodeId] = Counts[NodeIdA] + Counts[NodeIdB];
+				
+				// insert sort, one round
+				for (auto J = NewNodeId; J > I + 2; J -= 1) {
+					if (Counts[NodeIds[J + 0]] > Counts[NodeIds[J - 1]]) { break; }
+					Swap(&NodeIds[J + 0], &NodeIds[J - 1]);
+				}
+				
+				I += 2;
+				NewNodeId += 1;
 			}
 		}
 		
-		for (auto NodeIndex = Count; NodeIndex --> 0;) {
-			auto BitCount = 1;
-			auto ParentNodeIndex = ParentNodes[NodeIndex];
-			while (ParentNodeIndex != 0) {
-				ParentNodeIndex = ParentNodes[ParentNodeIndex];
-				BitCount += 1;
+		// get bit count
+		Counts[NodeCount - 1] = 0; // root
+		for (auto I = NodeCount - 1; I --> 0;) {
+			auto NodeId       = NodeIds[I];
+			auto ParentNodeId = ParentNodes[NodeId];
+			Counts[NodeId]    = Counts[ParentNodeId] + 1;
+			if (NodeId < HistogrammSize) {
+				BitCounts[NodeId] = Counts[NodeId];
 			}
-			Histogramm[NodeIndex].Count = BitCount;
-			Histogramm[NodeIndex].NodeIndex = 0; // TODO 
 		}
+		
+		// clean up
+		HeapFree(ParentNodes);
+		HeapFree(NodeIds);
+		HeapFree(Counts);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void CalculateTree(
-		tCount_NodeIndex* Histogramm,
-		tNat32            Count
+		tArray<tNat32>& Histogramm,
+		tArray<tNat32>& BitCounts,  // OUT
+		tArray<tNat32>& BitsArray   // OUT
 	//=============================================================================
 	) {
-		CalculateBitCount(Histogramm, Count);
+		CalculateBitCount(Histogramm, BitCounts);
+		
+		auto Bits = 0;
+		auto BitCount = 0;
+		for (auto NodeId = BitCounts.Size; NodeId --> 0;) {
+			auto NewBitCount = BitCounts[NodeId];
+			Bits <<= NewBitCount - BitCount;
+			BitCount = NewBitCount;
+			
+			BitsArray[NodeId] = Bits;
+			
+			Bits += 1;
+		}
 	}
 	
 #	ifdef TEST
-		static inline
 		//=============================================================================
-		void TestSwap(
+		static inline
+		void TestCalcBitCount(
 		//=============================================================================
 		) {
-			tCount_NodeIndex A;
-			tCount_NodeIndex B;
+			tNat32 Histogram[]    = { 1, 1, 4, 4, 8, 20, 20, 20 };
+			//                         \2/  |  |  |   |   |   |
+			//                           \6/   |  |   |   |   |
+			//                             \10/   |   |   |   |
+			//                                \18/    |   |   |
+			//                                   \ 38/    |   |
+			//                                       \    \40/
+			//                                        \78/
+			tNat32 BitCountsRef[] = { 6, 6, 5, 4, 3,  2,  2,  2 };
+			tNat32 BitCountsRes[] = { 0, 0, 0, 0, 0,  0,  0,  0 };
+			tNat32 BitsRes[] = {        0,        0,       0,      0,     0,    0,    0,    0 };
+			tNat32 BitsRef[] = { 0b111111, 0b111110, 0b11110, 0b1110, 0b110, 0b10, 0b01, 0b00 };
 			
-			A.Count = 5;
-			B.Count = 8;
+			tArray<tNat32> InHistogramm = AsArray(Histogram);
+			tArray<tNat32> OutCounts    = AsArray(BitCountsRes);
+			tArray<tNat32> OutBits      = AsArray(BitsRes);
+			CalculateTree(InHistogramm, OutCounts, OutBits);
 			
-			Swap(&A, &B);
+			for (auto I = _countof(Histogram); I --> 0;) {
+				ASSERT(BitCountsRes[I] == BitCountsRef[I]);
+			}
 			
-			ASSERT(A.Count == 8);
-			ASSERT(B.Count == 5);
-		}
-		
-		static inline
-		//=============================================================================
-		void TestSort(
-		//=============================================================================
-		) {
-			tCount_NodeIndex Array[] = {
-				{0, 0}, // count
-				
-				{1, 0}, // count
-				{1, 0}, // in
-				{1, 0}, // out
-				
-				{2, 0}, // count
-				{1, 0}, {2, 0}, // in
-				{1, 0}, {2, 0}, // out
-				
-				{2, 0}, // count
-				{1, 0}, {1, 0}, // in
-				{1, 0}, {1, 0}, // out
-				
-				{2, 0}, // count
-				{2, 0}, {1, 0}, // in
-				{1, 0}, {2, 0}, // out
-				
-				{5, 0}, // count
-				{1, 0}, {1, 0}, {1, 0}, {1, 0}, {1, 0}, // in
-				{1, 0}, {1, 0}, {1, 0}, {1, 0}, {1, 0}, // out
-				
-				{9, 0}, // count
-				{4, 0}, {3, 0}, {8, 0}, {2, 0}, {4, 0}, {2, 0}, {8, 0}, {23, 0}, { 1, 0}, // in
-				{1, 0}, {2, 0}, {2, 0}, {3, 0}, {4, 0}, {4, 0}, {8, 0}, { 8, 0}, {23, 0} // out
-			};
-			auto CountIndex = 0;
-			while (CountIndex < _countof(Array)) {
-				auto Count = Array[CountIndex].Count;
-				auto BaseIndex = CountIndex + 1;
-				auto BaseIndexRef = BaseIndex + Count;
-				InPlaceSort(&Array[BaseIndex], Count);
-				for (auto I = Count; I --> 0;) {
-					ASSERT(Array[BaseIndex + I].Count == Array[BaseIndexRef + I].Count);
-				}
-				CountIndex += 2*Count + 1;
+			for (auto I = _countof(Histogram); I --> 0;) {
+				ASSERT(BitsRes[I] == BitsRef[I]);
 			}
 		}
 		
-		static inline
 		//=============================================================================
+		static inline
 		void Test(
 		//=============================================================================
 		) {
 			TestSwap();
 			TestSort();
+			TestCalcBitCount();
 		}
 #	endif
 }
@@ -656,8 +820,8 @@ using iBitReader = struct {
 	void*                  Context;
 };
 
-static inline
 //=============================================================================
+static inline
 tNat32 ReadBit(
 	iBitReader* BitReader
 //=============================================================================
@@ -665,8 +829,8 @@ tNat32 ReadBit(
 	return BitReader->ReadBit(BitReader->Context);
 }
 
-static inline
 //=============================================================================
+static inline
 void Close(
 	iBitReader* BitReader
 //=============================================================================
@@ -681,8 +845,8 @@ using iBitWriter = struct {
 	void*                        Context;
 };
 
-static inline
 //=============================================================================
+static inline
 void WriteBit(
 	iBitWriter* BitWriter,
 	tNat32      Bit
@@ -691,8 +855,8 @@ void WriteBit(
 	BitWriter->WriteBit(BitWriter->Context, Bit);
 }
 
-static inline
 //=============================================================================
+static inline
 void Close(
 	iBitWriter* BitWriter
 //=============================================================================
@@ -714,8 +878,8 @@ namespace BitStream {
 		tNat32                  Byte;
 	};
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tWriter*                BitStream,
 		BufferdStream::tWriter* Stream
@@ -725,8 +889,8 @@ namespace BitStream {
 		BitStream->Stream = Stream;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Close(
 		tWriter* BitStream
 	//=============================================================================
@@ -737,8 +901,8 @@ namespace BitStream {
 		*BitStream = {};
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void WriteBit(
 		tWriter* BitStream,
 		tNat32   Bit
@@ -766,8 +930,8 @@ namespace BitStream {
 //		STOP_CLOCK(WriteBit);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tReader*                BitStream,
 		BufferdStream::tReader* Stream
@@ -777,8 +941,8 @@ namespace BitStream {
 		BitStream->Stream = Stream;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Close(
 		tReader* BitStream
 	//=============================================================================
@@ -786,8 +950,8 @@ namespace BitStream {
 		*BitStream = {};
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 ReadBit(
 		tReader* BitStream
 	//=============================================================================
@@ -811,8 +975,8 @@ namespace BitStream {
 		return Byte & 1;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iBitWriter GetInterface(
 		tWriter* BitStream
 	//=============================================================================
@@ -824,8 +988,8 @@ namespace BitStream {
 		return Interface;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iBitReader GetInterface(
 		tReader* BitStream
 	//=============================================================================
@@ -861,8 +1025,8 @@ namespace ArithmeticBitStream {
 		tInt32 _; // 64 bit alignment
 	};
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tWriter*    Writer,
 		iBitWriter* BitStream
@@ -875,8 +1039,8 @@ namespace ArithmeticBitStream {
 		Writer->Count0_Old = 1 << 7;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tReader*    Reader,
 		iBitReader* BitStream
@@ -888,9 +1052,9 @@ namespace ArithmeticBitStream {
 		Reader->Count0     = 1 << 7;
 		Reader->Count0_Old = 1 << 7;
 	}
-
-	static inline
+	
 	//=============================================================================
+	static inline
 	void WriteBit(
 		tWriter* Stream,
 		tNat32   Bit
@@ -958,8 +1122,8 @@ namespace ArithmeticBitStream {
 //		START_CLOCK(ArithmeticBitStream_WriteBit);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 ReadBit(
 		tReader* Stream
 	//=============================================================================
@@ -1029,8 +1193,8 @@ namespace ArithmeticBitStream {
 		return Bit;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Close(
 		tWriter* Stream
 	//=============================================================================
@@ -1039,8 +1203,8 @@ namespace ArithmeticBitStream {
 		*Stream = {};
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Close(
 		tReader* Stream
 	//=============================================================================
@@ -1049,8 +1213,8 @@ namespace ArithmeticBitStream {
 		*Stream = {};
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iBitReader GetInterface(
 		tReader* Reader
 	//=============================================================================
@@ -1062,8 +1226,8 @@ namespace ArithmeticBitStream {
 		return Interface;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iBitWriter GetInterface(
 		tWriter* Writer
 	//=============================================================================
@@ -1076,8 +1240,8 @@ namespace ArithmeticBitStream {
 	}
 }
 
-static inline
 //=============================================================================
+static inline
 void WriteNat_(
 	iBitWriter* BitWriter,
 	tNat64      Value
@@ -1092,9 +1256,9 @@ void WriteNat_(
 	
 //	STOP_CLOCK(WriteNat_);
 }
-	
-static inline
+
 //=============================================================================
+static inline
 tNat64 ReadNat_(
 	iBitReader* BitReader
 //=============================================================================
@@ -1113,8 +1277,8 @@ tNat64 ReadNat_(
 
 namespace EliasGammaCode {
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Write(
 		iBitWriter* BitWriter,
 		tNat64      Value
@@ -1138,8 +1302,8 @@ namespace EliasGammaCode {
 //		STOP_CLOCK(Elias_Write);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat64 Read(
 		iBitReader* BitReader
 	//=============================================================================
@@ -1168,8 +1332,8 @@ namespace EliasGammaCode {
 namespace FibonacciCode {
 	static tNat64 gFibArray[50];
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tNat64* FibArray,
 		tNat32  MaxFibBits
@@ -1190,8 +1354,8 @@ namespace FibonacciCode {
 		}
 	}
 
-	static inline
 	//=============================================================================
+	static inline
 	tNat64 NatToFib(
 		tNat64* FibArray,
 		tNat64  Nat
@@ -1217,8 +1381,8 @@ namespace FibonacciCode {
 		return Fib;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat64 FibToNat(
 		tNat64 Fib
 	//=============================================================================
@@ -1244,8 +1408,8 @@ namespace FibonacciCode {
 		return Nat;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Write(
 		iBitWriter* BitWriter,
 		tNat64      Value
@@ -1264,8 +1428,8 @@ namespace FibonacciCode {
 //		STOP_CLOCK(Fib_Write);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat64 Read(
 		iBitReader* BitReader
 	//=============================================================================
@@ -1286,8 +1450,8 @@ namespace FibonacciCode {
 	}
 	
 #	ifdef TEST
-		static inline
 		//=============================================================================
+		static inline
 		void Test(
 		//=============================================================================
 		) {
@@ -1308,8 +1472,8 @@ namespace HaarWavelet {
 		tInt16 D;
 	};
 	
-	static inline
 	//=============================================================================
+	static inline
 	tQuad EnCode(
 		tQuad Src
 	//=============================================================================
@@ -1329,8 +1493,8 @@ namespace HaarWavelet {
 		return Res;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tQuad DeCode(
 		tQuad Src
 	//=============================================================================
@@ -1351,8 +1515,8 @@ namespace HaarWavelet {
 	}
 	
 #	ifdef TEST
-		static inline
 		//=============================================================================
+		static inline
 		void Test(
 		//=============================================================================
 		) {
@@ -1389,8 +1553,8 @@ namespace Layer {
 		tInt32 _; // 64 bit alignment
 	};
 	
-	static
 	//=============================================================================
+	static
 	tNat32 Init(
 		tLevel* Layers,
 		tNat32  SizeX,
@@ -1465,9 +1629,9 @@ namespace Layer {
 		}
 		return InitLevel;
 	}
-
-	static inline
+	
 	//=============================================================================
+	static inline
 	tInt32 DeltaQubicWavelet(
 		tInt32 Last2,
 		tInt32 Last1,
@@ -1484,8 +1648,8 @@ namespace Layer {
 		//return 0; // OFF
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tInt32 DeltaQubicWaveletPre2(
 		tInt32 Curr,
 		tInt32 Next1,
@@ -1496,9 +1660,9 @@ namespace Layer {
 		auto Last1 = 2*Curr - Next1;
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
-
-	static inline
+	
 	//=============================================================================
+	static inline
 	tInt32 DeltaQubicWaveletPre1(
 		tInt32 Last1,
 		tInt32 Curr,
@@ -1510,8 +1674,8 @@ namespace Layer {
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tInt32 DeltaQubicWaveletPost1(
 		tInt32 Last2,
 		tInt32 Last1,
@@ -1523,8 +1687,8 @@ namespace Layer {
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tInt32 DeltaQubicWaveletPost2(
 		tInt32 Last2,
 		tInt32 Last1,
@@ -1539,8 +1703,8 @@ namespace Layer {
 	const tInt32 PredDist = 2;
 	const tInt32 DFactor = 2;// shift 2
 	
-	static
 	//=============================================================================
+	static
 	void SplitWithQubPred(
 		tLevel* SrcLevel,
 		tLevel* DesLevel
@@ -1725,8 +1889,8 @@ namespace Layer {
 		STOP_CLOCK(SplitWithQubPred);
 	}
 	
-	static
 	//=============================================================================
+	static
 	void ComposeWithQubPred(
 		tLevel* SrcLevel,
 		tLevel* DesLevel
@@ -1916,9 +2080,10 @@ namespace Layer {
 		
 		STOP_CLOCK(ComposeWithQubPred);
 	}
-
+	
 #	ifdef TEST_
 		//=============================================================================
+		static inline
 		void Test(
 		//=============================================================================
 		) {
@@ -2219,8 +2384,8 @@ using iCurve = struct {
 	tFunc1<void*, tNat32>* GetY;
 };
 
-static inline
 //=============================================================================
+static inline
 void Init(
 	iCurve* CurveInterface,
 	tNat32  SizeX,
@@ -2230,8 +2395,8 @@ void Init(
 	CurveInterface->Init(CurveInterface->Env, SizeX, SizeY);
 }
 
-static inline
 //=============================================================================
+static inline
 void Next(
 	iCurve* CurveInterface
 //=============================================================================
@@ -2239,8 +2404,8 @@ void Next(
 	CurveInterface->Next(CurveInterface->Env);
 }
 
-static inline
 //=============================================================================
+static inline
 tNat32 GetX(
 	iCurve* CurveInterface
 //=============================================================================
@@ -2248,8 +2413,8 @@ tNat32 GetX(
 	return CurveInterface->GetX(CurveInterface->Env);
 }
 
-static inline
 //=============================================================================
+static inline
 tNat32 GetY(
 	iCurve* CurveInterface
 //=============================================================================
@@ -2265,8 +2430,8 @@ namespace Scanline {
 		tNat32 _;
 	};
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tState* State,
 		tNat32  SizeX,
@@ -2277,8 +2442,8 @@ namespace Scanline {
 		State->MaxX = SizeX;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Next(
 		tState* State
 	//=============================================================================
@@ -2290,8 +2455,8 @@ namespace Scanline {
 		}
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 GetX(
 		tState* State
 	//=============================================================================
@@ -2299,8 +2464,8 @@ namespace Scanline {
 		return State->X;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 GetY(
 		tState* State
 	//=============================================================================
@@ -2308,8 +2473,8 @@ namespace Scanline {
 		return State->Y;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iCurve GetInterface(
 		tState* State
 	//=============================================================================
@@ -2324,7 +2489,6 @@ namespace Scanline {
 		
 		return Interface;
 	}
-	
 }
 
 namespace ZCurve {
@@ -2334,8 +2498,8 @@ namespace ZCurve {
 		tNat32 Y;
 	};
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Init(
 		tState* State,
 		tNat32  SizeX,
@@ -2345,8 +2509,8 @@ namespace ZCurve {
 		*State = {};
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	void Next(
 		tState* State
 	//=============================================================================
@@ -2364,8 +2528,8 @@ namespace ZCurve {
 		State->Y = (XY >> 32) & 0xFFFF;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 GetX(
 		tState* State
 	//=============================================================================
@@ -2373,8 +2537,8 @@ namespace ZCurve {
 		return State->X;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	tNat32 GetY(
 		tState* State
 	//=============================================================================
@@ -2382,8 +2546,8 @@ namespace ZCurve {
 		return State->Y;
 	}
 	
-	static inline
 	//=============================================================================
+	static inline
 	iCurve GetInterface(
 		tState* State
 	//=============================================================================
@@ -2432,8 +2596,8 @@ namespace HilbertCurve {
 		E = 3,
 	};
 	
-	inline static
 	//=============================================================================
+	inline static
 	tStepType StepType(
 		tStack Stack
 	//=============================================================================
@@ -2441,8 +2605,8 @@ namespace HilbertCurve {
 		return (tStepType)(Stack & 3);
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	tStepNumber StepNumber(
 		tStack Stack
 	//=============================================================================
@@ -2450,8 +2614,8 @@ namespace HilbertCurve {
 		return (tStepNumber)((Stack >> 2) & 3);
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	void AddLevel(
 		tStack* Stack
 	//=============================================================================
@@ -2468,8 +2632,8 @@ namespace HilbertCurve {
 		*Stack |= (NewStepNumber << 2) | NewStepType;
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	tStack New(
 		tNat32 Levels
 	//=============================================================================
@@ -2483,8 +2647,8 @@ namespace HilbertCurve {
 		return Stack;
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	void Init(
 		tState* State,
 		tNat32  SizeX,
@@ -2506,8 +2670,8 @@ namespace HilbertCurve {
 		State->Y = 0;
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	tDirection Direction(
 		tStack Stack
 	//=============================================================================
@@ -2515,8 +2679,8 @@ namespace HilbertCurve {
 		return (tDirection)((Stack ^ (Stack >> 2)) & 3);
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	void Next(
 		tState* State
 	//=============================================================================
@@ -2555,8 +2719,8 @@ namespace HilbertCurve {
 //		STOP_CLOCK(HilbertCurve_Next);
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	tNat32 GetX(
 		tState* State
 	//=============================================================================
@@ -2564,8 +2728,8 @@ namespace HilbertCurve {
 		return State->X;
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	tNat32 GetY(
 		tState* State
 	//=============================================================================
@@ -2573,8 +2737,8 @@ namespace HilbertCurve {
 		return State->Y;
 	}
 	
-	inline static
 	//=============================================================================
+	inline static
 	iCurve GetInterface(
 		tState* State
 	//=============================================================================
@@ -2591,8 +2755,8 @@ namespace HilbertCurve {
 	}
 	
 #	ifdef TEST
-		static inline
 		//=============================================================================
+		static inline
 		void Test(
 		//=============================================================================
 		) {
@@ -2639,8 +2803,8 @@ namespace HilbertCurve {
 	using tCurveState = Scanline::tState;
 #endif
 
-static
 //=============================================================================
+static
 void WriteLayer(
 	BufferdStream::tWriter* Stream,
 	tInt16*                 DataPtr,
@@ -2744,8 +2908,8 @@ void WriteLayer(
 	STOP_CLOCK(WriteLayer);
 }
 
-static
 //=============================================================================
+static
 void ReadLayer(
 	BufferdStream::tReader* Stream,
 	tInt16*                 DataPtr,
