@@ -4,6 +4,11 @@
 
 #ifdef VS
 #	include <malloc.h> // alloca(...)
+#	define LL "ll"
+#endif
+
+#ifndef VS
+#	define LL "I64"
 #endif
 
 // TODO-List:
@@ -11,6 +16,8 @@
 // - Huffman vs Fibonacci
 // - Parallel
 // - ContainerFormat
+// - StackBased-MemoryManager (replace malloc and free)
+// - DependencyInjection for MemoryManagment
 
 using tBool = bool;
 
@@ -79,9 +86,10 @@ static tStream* gLogStream = NULL;
 #endif
 
 //=============================================================================
+template <typename g>
 static inline
-tInt32 Abs(
-	tInt32 Value
+g Abs(
+	g Value
 //=============================================================================
 ) {
 	return (Value < 0) ? -Value : Value;
@@ -98,30 +106,22 @@ tInt32 Sign(
 }
 
 //=============================================================================
+template <typename g>
 static inline
-tInt32 Min(
-	tInt32 A,
-	tInt32 B
+g Min(
+	g A,
+	g B
 //=============================================================================
 ) {
 	return (A < B) ? A : B;
 }
 
 //=============================================================================
+template <typename g>
 static inline
-tNat64 Min(
-	tNat64 A,
-	tNat64 B
-//=============================================================================
-) {
-	return (A < B) ? A : B;
-}
-
-//=============================================================================
-static inline
-tInt32 Max(
-	tInt32 A,
-	tInt32 B
+g Max(
+	g A,
+	g B
 //=============================================================================
 ) {
 	return (A > B) ? A : B;
@@ -154,8 +154,8 @@ void Swap(
 }
 
 template <typename g>
-struct tArray sealed {
-	tNat64 Size;
+struct tArray final {
+	tNat32 Size;
 	g*     Values;
 	
 	g& operator[] (const tNat64);
@@ -180,7 +180,7 @@ tArray<g> Take(
 	tNat32    Count
 //=============================================================================
 ) {
-	Array.Size = Min(Array.Size, Count);
+	Array.Size = Min<g>(Array.Size, Count);
 	return Array;
 }
 
@@ -192,7 +192,7 @@ tArray<g> Skip(
 	tNat32    Count
 //=============================================================================
 ) {
-	auto Delta = Min(Array.Size, Count);
+	auto Delta = Min<g>(Array.Size, Count);
 	Array.Values += Delta;
 	Array.Size   -= Delta;
 	return Array;
@@ -202,7 +202,7 @@ tArray<g> Skip(
 template<typename g>
 static inline
 void InPlaceQuickSort(
-	tArray<g>            Nodes,
+	tArray<g>             Nodes,
 	tFunc2<g, g, tInt32>* Comp
 //=============================================================================
 ) {
@@ -210,7 +210,7 @@ void InPlaceQuickSort(
 		return;
 	}
 	
-	auto Pivot  = Nodes[Nodes.Size >> 1];
+	auto Pivot = Nodes[Nodes.Size >> 1];
 	auto Low   = (tInt32)0;
 	auto Hight = (tInt32)(Nodes.Size - 1);
 	
@@ -296,12 +296,22 @@ void InPlaceQuickSort(
 			CountIndex += 2*Count + 1;
 		}
 	}
+	
+	//=============================================================================
+	static inline
+	void TestArray(
+	//=============================================================================
+	) {
+		TestSwap();
+		TestSort();
+	}
 #endif
 
 #ifdef TIMER
+#	define MEASURE_BLOCK(ClockId) Clock::tMeasure aClockId(Clock::Id::ClockId);
 #	define START_CLOCK(ClockId) Clock::Start(Clock::Id::ClockId);
 #	define STOP_CLOCK(ClockId) Clock::Stop(Clock::Id::ClockId);
-#	define PRINT_CLOCKS(stream) Clock::print((stream));
+#	define PRINT_CLOCKS(Stream) Clock::print((Stream));
 	
 	namespace Clock {
 		
@@ -323,6 +333,7 @@ void InPlaceQuickSort(
 				ComposeWithQubPred,
 				ReadLayer,
 				WriteLayer,
+				WriteLayer_ShowHistogram,
 				HilbertCurve_Next,
 				WriteNat_,
 				ReadNat_,
@@ -352,11 +363,12 @@ void InPlaceQuickSort(
 				_57,
 				_58,
 				_59,
+				
+				MaxClocks
 			};
 		}
 		
-		const tNat32 MaxClocks = 100;
-		tClock gClocks[MaxClocks] = {};
+		tClock gClocks[Id::MaxClocks] = {};
 		
 #		ifdef VS
 #			include <intrin.h>
@@ -403,13 +415,36 @@ void InPlaceQuickSort(
 			}
 		}
 		
+		class tMeasure final {
+			tNat32 _Id;
+			
+			public:
+			//=============================================================================
+			inline
+			tMeasure(
+				tNat32 aId
+			//=============================================================================
+			) {
+				_Id = aId;
+				Start(_Id);
+			}
+			
+			//=============================================================================
+			inline
+			~tMeasure(
+			//=============================================================================
+			) {
+				Stop(_Id);
+			}
+		};
+		
 		//=============================================================================
 		static inline
 		void print(
 			tStream* Stream
 		//=============================================================================
 		) {
-			static char* Names[MaxClocks] = {};
+			static const char* Names[Id::MaxClocks] = {};
 #			define ADD_CLOCK(ClockId) Names[Id::ClockId] = #ClockId;
 			ADD_CLOCK(ArithmeticBitStream_ReadBit);
 			ADD_CLOCK(ArithmeticBitStream_WriteBit);
@@ -436,12 +471,13 @@ void InPlaceQuickSort(
 			ADD_CLOCK(Fib_Write);
 			ADD_CLOCK(Elias_Write);
 			ADD_CLOCK(WriteLayer);
+			ADD_CLOCK(WriteLayer_ShowHistogram);
 			ADD_CLOCK(WriteByte_fwrite);
 			ADD_CLOCK(WriteNat_);
 			ADD_CLOCK(ReadByte_fread);
 #			undef ADD_CLOCK
 			
-			for (auto I = 0; I < MaxClocks; I += 1) {
+			for (auto I = (tNat32)0; I < Id::MaxClocks; I += 1) {
 				auto Count = Clock::gClocks[I].Count;
 				if (Count) {
 					auto Duration = Clock::gClocks[I].Duration;
@@ -464,11 +500,11 @@ void InPlaceQuickSort(
 					} else {
 						fprintf(Stream, "ClockId %d: ", I);
 					}
-					fprintf(Stream, "%lu", Count);
+					fprintf(Stream, "%" LL "u", Count);
 					fprintf(Stream, "%s ", CountUnit);
-					fprintf(Stream, "* %lu", Mean);
+					fprintf(Stream, "* %" LL "u", Mean);
 					fprintf(Stream, "%s = ", MeanUnit);
-					fprintf(Stream, "%lu", Duration);
+					fprintf(Stream, "%" LL "u", Duration);
 					fprintf(Stream, "%s\n", DuratuonUnit);
 				}
 			}
@@ -476,6 +512,7 @@ void InPlaceQuickSort(
 		
 	}
 #else
+#	define MEASURE_BLOCK(ClockId)
 #	define START_CLOCK(ClockId)
 #	define STOP_CLOCK(ClockId)
 #	define PRINT_CLOCKS(stream)
@@ -503,193 +540,161 @@ void HeapFree(
 	Array.Values = NULL;
 	Array.Size = 0;
 }
-
-#if 0 // TODO: ByteReaderInterface
-using iByteReader = struct {
-	void*                 Env;
-	tFunc1<void*, tNat32> ReadByte;
-	tFunc1<void*, void>   Close;
-};
-
-static inline
 //=============================================================================
-tNat32 ReadByte (
-	iByteReader* Reader
+template <typename g>
+g* HeapAlloc(
 //=============================================================================
 ) {
-	return Reader->ReadByte(Reader->Env);
+	return (g*)malloc(sizeof(g));
 }
 
-static inline
 //=============================================================================
-void Close (
-	iByteReader* Reader
+template <typename g>
+void HeapFree(
+	g* Memory
 //=============================================================================
 ) {
-	Reader->Close(Reader->Env);
+	free(Memory);
 }
 
-using iByteWriter = struct {
-	void*                       Env;
-	tFunc2<void*, tNat32, void> WriteByte;
-	tFunc1<void*, void>         Close;
-};
-
-static inline
-//=============================================================================
-void WriteByte (
-	iByteWriter* Writer,
-	tNat32       Byte
-//=============================================================================
-) {
-	Writer->WriteByte(Writer->Env, Byte);
-}
-
-static inline
-//=============================================================================
-void Close (
-	iByteWriter* Writer
-//=============================================================================
-) {
-	Writer->Close(Writer->Env);
-}
-#endif
-
-namespace Huffman { // TODO: Huffman
-	using tCount_NodeIndex = struct {
-		tNat32 Count;
-		tNat32 NodeIndex;
+namespace ByteStream {
+	using tReader = struct {
+		void*                  Env;
+		tFunc1<void*, tNat32>* ReadByte;
+		tFunc1<void*, void>*   Close;
 	};
 	
-	// TODO: why i need references ??? (compiler bug?)
 	//=============================================================================
 	static inline
-	void CalculateBitCount(
-		tArray<tNat32>& SortedHistogramm,
-		tArray<tNat32>& BitCounts         // OUT
+	tReader Reader(
+		void* Env,
+		tFunc1<void*, tNat32>* ReadByte,
+		tFunc1<void*, void>* Close
 	//=============================================================================
 	) {
-		ASSERT(SortedHistogramm.Size <= (1 << 17))
-		
-		// init
-		auto HistogrammSize = SortedHistogramm.Size;
-		auto NodeCount = 2*HistogrammSize - 1;
-		
-		auto NodeIds     = HeapAlloc<tNat32>(NodeCount);
-		auto ParentNodes = HeapAlloc<tNat32>(NodeCount);
-		auto Counts      = HeapAlloc<tNat32>(NodeCount);
-		
-		for (auto NodeId = NodeCount; NodeId --> 0;) {
-			NodeIds[NodeId] = (tNat32)NodeId;
-			ParentNodes[NodeId] = 0;
-			Counts[NodeId] = (NodeId < HistogrammSize) ? SortedHistogramm[NodeId] : 0;
-		}
-		
-		{ // build tree
-			auto I = (tNat32)0;
-			auto NewNodeId = (tNat32)HistogrammSize;
-			while (I <= NodeCount - 2) {
-				ASSERT(NewNodeId <= NodeCount)
-				auto NodeIdA = NodeIds[I + 0];
-				auto NodeIdB = NodeIds[I + 1];
-				ParentNodes[NodeIdA] = NewNodeId;
-				ParentNodes[NodeIdB] = NewNodeId;
-				
-				Counts[NewNodeId] = Counts[NodeIdA] + Counts[NodeIdB];
-				
-				// insert sort, one round
-				for (auto J = NewNodeId; J > I + 2; J -= 1) {
-					if (Counts[NodeIds[J + 0]] > Counts[NodeIds[J - 1]]) { break; }
-					Swap(&NodeIds[J + 0], &NodeIds[J - 1]);
-				}
-				
-				I += 2;
-				NewNodeId += 1;
-			}
-		}
-		
-		// get bit count
-		Counts[NodeCount - 1] = 0; // root
-		for (auto I = NodeCount - 1; I --> 0;) {
-			auto NodeId       = NodeIds[I];
-			auto ParentNodeId = ParentNodes[NodeId];
-			Counts[NodeId]    = Counts[ParentNodeId] + 1;
-			if (NodeId < HistogrammSize) {
-				BitCounts[NodeId] = Counts[NodeId];
-			}
-		}
-		
-		// clean up
-		HeapFree(ParentNodes);
-		HeapFree(NodeIds);
-		HeapFree(Counts);
+		tReader Result;
+		Result.Env = Env;
+		Result.ReadByte = ReadByte;
+		Result.Close = Close;
+		return Result;
 	}
 	
+	using tWriter = struct {
+		void*                        Env;
+		tFunc2<void*, tNat32, void>* WriteByte;
+		tFunc1<void*, void>*         Close;
+	};
 
 	//=============================================================================
 	static inline
-	void CalculateBits(
-		tArray<tNat32>& BitCounts,
-		tArray<tNat32>& BitsArray  // OUT
+	tWriter Writer(
+		void* Env,
+		tFunc2<void*, tNat32, void>* WriteByte,
+		tFunc1<void*, void>* Close
 	//=============================================================================
 	) {
-		auto Bits = 0;
-		auto BitCount = 0;
-		for (auto NodeId = BitCounts.Size; NodeId --> 0;) {
-			auto NewBitCount = BitCounts[NodeId];
-			Bits <<= NewBitCount - BitCount;
-			BitCount = NewBitCount;
-			
-			BitsArray[NodeId] = Bits;
-			
-			Bits += 1;
-		}
+		tWriter Result;
+		Result.Env = Env;
+		Result.WriteByte = WriteByte;
+		Result.Close = Close;
+		return Result;
 	}
 	
-#	ifdef TEST
-		//=============================================================================
-		static inline
-		void TestCalcBitCount(
-		//=============================================================================
-		) {
-			tNat32 Histogram[]    = { 1, 1, 4, 4, 8, 20, 20, 20 };
-			//                         \2/  |  |  |   |   |   |
-			//                           \6/   |  |   |   |   |
-			//                             \10/   |   |   |   |
-			//                                \18/    |   |   |
-			//                                   \ 38/    |   |
-			//                                       \    \40/
-			//                                        \78/
-			tNat32 BitCountsRef[] = { 6, 6, 5, 4, 3,  2,  2,  2 };
-			tNat32 BitCountsRes[] = { 0, 0, 0, 0, 0,  0,  0,  0 };
-			tNat32 BitsRes[] = {        0,        0,       0,      0,     0,    0,    0,    0 };
-			tNat32 BitsRef[] = { 0b111111, 0b111110, 0b11110, 0b1110, 0b110, 0b10, 0b01, 0b00 };
-			
-			tArray<tNat32> InHistogramm = AsArray(Histogram);
-			tArray<tNat32> OutCounts    = AsArray(BitCountsRes);
-			tArray<tNat32> OutBits      = AsArray(BitsRes);
-			
-			CalculateBitCount(InHistogramm, OutCounts);
-			for (auto I = _countof(Histogram); I --> 0;) {
-				ASSERT(BitCountsRes[I] == BitCountsRef[I]);
+	//=============================================================================
+	static inline
+	tNat32 Read (
+		ByteStream::tReader* Reader
+	//=============================================================================
+	) {
+		return Reader->ReadByte(Reader->Env);
+	}
+	
+	//=============================================================================
+	static inline
+	void Close (
+		ByteStream::tReader* Reader
+	//=============================================================================
+	) {
+		Reader->Close(Reader->Env);
+	}
+	
+	//=============================================================================
+	static inline
+	void Write (
+		ByteStream::tWriter* Writer,
+		tNat32         Byte
+	//=============================================================================
+	) {
+		Writer->WriteByte(Writer->Env, Byte);
+	}
+	
+	//=============================================================================
+	static inline
+	void Close (
+		ByteStream::tWriter* Writer
+	//=============================================================================
+	) {
+		Writer->Close(Writer->Env);
+	}
+}
+
+namespace MemoryStream {
+	using tReader = struct {
+		tNat32 Count;
+		tArray<tNat8> Bytes;
+	};
+	
+	//=============================================================================
+	static inline
+	ByteStream::tReader Reader(
+		tArray<tNat8> Bytes
+	//=============================================================================
+	) {
+		auto Env = HeapAlloc<tReader>();
+		Env->Bytes = Bytes;
+		Env->Count = 0;
+		return ByteStream::Reader(
+			(void*)Env,
+			[](void* Env) {
+				auto Reader = (tReader*)Env;
+				ASSERT(Reader->Count < Reader->Bytes.Size);
+				auto Byte = Reader->Bytes[Reader->Count];
+				Reader->Count += 1;
+				return (tNat32)Byte;
+			},
+			[](void* Env) {
+				HeapFree((tReader*)Env);
 			}
-			
-			CalculateBits(OutCounts, OutBits);
-			for (auto I = _countof(Histogram); I --> 0;) {
-				ASSERT(BitsRes[I] == BitsRef[I]);
+		);
+	}
+	
+	using tWriter = struct {
+		tNat32 Count;
+		tArray<tNat8> Bytes;
+	};
+	
+	//=============================================================================
+	static inline
+	ByteStream::tWriter Writer(
+		tArray<tNat8> Bytes
+	//=============================================================================
+	) {
+		auto Env = HeapAlloc<tReader>();
+		Env->Bytes = Bytes;
+		Env->Count = 0;
+		return ByteStream::Writer(
+			(void*)Env,
+			[](void* Env, tNat32 Byte) {
+				auto Writer = (tWriter*)Env;
+				ASSERT(Writer->Count < Writer->Bytes.Size);
+				Writer->Bytes[Writer->Count] = (tNat8)Byte;
+				Writer->Count += 1;
+			},
+			[](void* Env) {
+				HeapFree((tWriter*)Env);
 			}
-		}
-		
-		//=============================================================================
-		static inline
-		void Test(
-		//=============================================================================
-		) {
-			TestSwap();
-			TestSort();
-			TestCalcBitCount();
-		}
-#	endif
+		);
+	}
 }
 
 namespace BufferdStream {
@@ -736,29 +741,26 @@ namespace BufferdStream {
 		tNat8    Byte
 	//=============================================================================
 	) {
-//		START_CLOCK(WriteByte);
+//		MEASURE_BLOCK(WriteByte);
 		
 		const tNat32 BufferSize = sizeof(Stream->Buffer);
 		auto Pos = Stream->Pos;
 		Stream->Buffer[Pos] = Byte;
 		Pos = (Pos + 1) % BufferSize;
 		if (Pos == 0) {
-//			START_CLOCK(WriteByte_fwrite);
+//			MEASURE_BLOCK(WriteByte_fwrite);
 			fwrite(Stream->Buffer, BufferSize, 1, Stream->Stream);
-//			STOP_CLOCK(WriteByte_fwrite);
 		}
 		Stream->Pos = Pos;
-		
-//		STOP_CLOCK(WriteByte);
 	}
 	
 	static inline
 	//=============================================================================
-	tInt32 ReadByte(
+	tNat32 ReadByte(
 		tReader* Stream
 	//=============================================================================
 	) {
-//		START_CLOCK(ReadByte);
+		MEASURE_BLOCK(ReadByte);
 		
 		const tNat32 BufferSize = sizeof(Stream->Buffer);
 		auto Pos = Stream->Pos;
@@ -767,7 +769,6 @@ namespace BufferdStream {
 			auto Bytes = (tNat32)fread(Stream->Buffer, 1, BufferSize, Stream->Stream);
 //			STOP_CLOCK(ReadByte_fread);
 			if (Bytes == 0) {
-				STOP_CLOCK(ReadByte);
 				return -1; // TODO: Fehlerbehandlung
 			}
 			if (Bytes != BufferSize) {
@@ -784,7 +785,6 @@ namespace BufferdStream {
 		Stream->Pos = (Pos + 1) % BufferSize;
 		auto Result =  Stream->Buffer[Pos];
 		
-//		STOP_CLOCK(ReadByte);
 		return Result;
 	}
 	
@@ -804,7 +804,6 @@ namespace BufferdStream {
 		tWriter* Stream
 	//=============================================================================
 	) {
-		const tNat32 BufferSize = sizeof(Stream->Buffer);
 //		START_CLOCK(WriteByte_fwrite);
 		fwrite(Stream->Buffer, Stream->Pos, 1, Stream->Stream);
 //		STOP_CLOCK(WriteByte_fwrite);
@@ -866,22 +865,22 @@ void Close(
 
 namespace BitStream {
 	using tReader = struct {
-		BufferdStream::tReader* Stream;
-		tNat32                  Bits;
-		tNat32                  Byte;
+		ByteStream::tReader* Stream;
+		tNat32               Bits;
+		tNat32               Byte;
 	};
 	
 	using tWriter = struct {
-		BufferdStream::tWriter* Stream;
-		tNat32                  Bits;
-		tNat32                  Byte;
+		ByteStream::tWriter* Stream;
+		tNat32               Bits;
+		tNat32               Byte;
 	};
 	
 	//=============================================================================
 	static inline
 	void Init(
-		tWriter*                BitStream,
-		BufferdStream::tWriter* Stream
+		tWriter*             BitStream,
+		ByteStream::tWriter* Stream
 	//=============================================================================
 	) {
 		*BitStream = {};
@@ -895,7 +894,7 @@ namespace BitStream {
 	//=============================================================================
 	) {
 		if (BitStream->Bits) {
-			BufferdStream::WriteByte(BitStream->Stream, (tNat8)BitStream->Byte);
+			ByteStream::Write(BitStream->Stream, (tNat8)BitStream->Byte);
 		}
 		*BitStream = {};
 	}
@@ -907,7 +906,7 @@ namespace BitStream {
 		tNat32   Bit
 	//=============================================================================
 	) {
-//		START_CLOCK(WriteBit);
+//		MEASURE_BLOCK(WriteBit);
 		
 		ASSERT((Bit & ~1) == 0);
 		
@@ -922,18 +921,16 @@ namespace BitStream {
 		
 		Bits = (Bits + 1) & 7;
 		if (Bits == 0) {
-			BufferdStream::WriteByte(BitStream->Stream, (tNat8)BitStream->Byte);
+			Write(BitStream->Stream, (tNat8)BitStream->Byte);
 		}
 		BitStream->Bits = Bits;
-		
-//		STOP_CLOCK(WriteBit);
 	}
 	
 	//=============================================================================
 	static inline
 	void Init(
-		tReader*                BitStream,
-		BufferdStream::tReader* Stream
+		tReader*             BitStream,
+		ByteStream::tReader* Stream
 	//=============================================================================
 	) {
 		*BitStream = {};
@@ -955,12 +952,12 @@ namespace BitStream {
 		tReader* BitStream
 	//=============================================================================
 	) {
-//		START_CLOCK(ReadBit);
+//		MEASURE_BLOCK(ReadBit);
 		
 		auto Bits = BitStream->Bits;
 		auto Byte = 0;
 		if (Bits == 0) {
-			Byte = BufferdStream::ReadByte(BitStream->Stream);
+			Byte = ByteStream::Read(BitStream->Stream);
 		} else {
 			Byte = BitStream->Byte >> 1;
 		}
@@ -970,7 +967,6 @@ namespace BitStream {
 		BitStream->Bits = Bits;
 		BitStream->Byte = Byte;
 		
-//		STOP_CLOCK(ReadBit);
 		return Byte & 1;
 	}
 	
@@ -1059,9 +1055,9 @@ namespace ArithmeticBitStream {
 		tNat32   Bit
 	//=============================================================================
 	) {
-//		START_CLOCK(ArithmeticBitStream_WriteBit);
+//		MEASURE_BLOCK(ArithmeticBitStream_WriteBit);
 		
-		const tNat32 Full = 1 << 16;
+		//const tNat32 Full = 1 << 16;
 		const tNat32 Half = 1 << 15;
 		const tNat32 Quad = 1 << 14;
 		
@@ -1117,8 +1113,6 @@ namespace ArithmeticBitStream {
 			Stream->Count0   >>= 1;
 			Stream->Count0_Old = (tNat8)Stream->Count0;
 		}
-		
-//		START_CLOCK(ArithmeticBitStream_WriteBit);
 	}
 	
 	//=============================================================================
@@ -1127,9 +1121,9 @@ namespace ArithmeticBitStream {
 		tReader* Stream
 	//=============================================================================
 	) {
-//		START_CLOCK(ArithmeticBitStream_ReadBit);
+//		MEASURE_BLOCK(ArithmeticBitStream_ReadBit);
 		
-		const tNat32 Full = 1 << 16;
+		//const tNat32 Full = 1 << 16;
 		const tNat32 Half = 1 << 15;
 		const tNat32 Quad = 1 << 14;
 		
@@ -1188,7 +1182,6 @@ namespace ArithmeticBitStream {
 			Stream->Range -= Delta;
 		}
 		
-//		STOP_CLOCK(ArithmeticBitStream_ReadBit);
 		return Bit;
 	}
 	
@@ -1246,14 +1239,12 @@ void WriteNat_(
 	tNat64      Value
 //=============================================================================
 ) {
-//	START_CLOCK(WriteNat_);
+//	MEASURE_BLOCK(WriteNat_);
 	
 	for (auto I = (tNat32)16; I --> 0;) {
 		auto Bit = (Value >> I) & 1;
 		WriteBit(BitWriter, (tNat32)Bit);
 	}
-	
-//	STOP_CLOCK(WriteNat_);
 }
 
 //=============================================================================
@@ -1262,7 +1253,7 @@ tNat64 ReadNat_(
 	iBitReader* BitReader
 //=============================================================================
 ) {
-//	START_CLOCK(ReadNat_);
+//	MEASURE_BLOCK(ReadNat_);
 	
 	auto Result = (tNat64)0;
 	for (auto I = 16; I --> 0;) {
@@ -1270,7 +1261,6 @@ tNat64 ReadNat_(
 		Result |= ReadBit(BitReader);
 	}
 	
-//	STOP_CLOCK(ReadNat_);
 	return Result;
 }
 
@@ -1283,7 +1273,7 @@ namespace EliasGammaCode {
 		tNat64      Value
 	//=============================================================================
 	) {
-//		START_CLOCK(Elias_Write);
+//		MEASURE_BLOCK(Elias_Write);
 		
 		Value += 1;
 		
@@ -1297,8 +1287,6 @@ namespace EliasGammaCode {
 			DataBits -= 1;
 			WriteBit(BitWriter, (Value >> DataBits) & 1);
 		}
-		
-//		STOP_CLOCK(Elias_Write);
 	}
 	
 	//=============================================================================
@@ -1307,7 +1295,7 @@ namespace EliasGammaCode {
 		iBitReader* BitReader
 	//=============================================================================
 	) {
-//		START_CLOCK(Elias_Read);
+//		MEASURE_BLOCK(Elias_Read);
 		
 		auto DataBits = 1;
 		auto Bit = ReadBit(BitReader);
@@ -1322,10 +1310,8 @@ namespace EliasGammaCode {
 			Value  |= ReadBit(BitReader);
 		}
 		
-//		STOP_CLOCK(Elias_Read);
 		return Value - 1;
 	}
-	
 }
 
 namespace FibonacciCode {
@@ -1360,14 +1346,14 @@ namespace FibonacciCode {
 		tNat64  Nat
 	//=============================================================================
 	) {
-//		START_CLOCK(NatToFib);
+//		MEASURE_BLOCK(NatToFib);
 		
 		auto FibBits = UsedBits(Nat);
 		FibBits += FibBits >> 1;
 		
 		auto Fib = (tNat64)0;
-		for (; FibBits > 0; FibBits -= 1) {
-			auto FibI = FibArray[FibBits-1];
+		while (FibBits --> 0) {
+			auto FibI = FibArray[FibBits];
 			auto Bit = Nat >= FibI;
 			if (Bit) {
 				Nat -= FibI;
@@ -1376,7 +1362,6 @@ namespace FibonacciCode {
 			Fib |= (tNat64)Bit;
 		}
 		
-//		STOP_CLOCK(NatToFib);
 		return Fib;
 	}
 	
@@ -1386,7 +1371,7 @@ namespace FibonacciCode {
 		tNat64 Fib
 	//=============================================================================
 	) {
-//		START_CLOCK(FibToNat);
+//		MEASURE_BLOCK(FibToNat);
 		
 		auto Nat = (tNat64)0;
 		
@@ -1403,7 +1388,6 @@ namespace FibonacciCode {
 			}
 		}
 		
-//		STOP_CLOCK(FibToNat);
 		return Nat;
 	}
 	
@@ -1414,7 +1398,7 @@ namespace FibonacciCode {
 		tNat64      Value
 	//=============================================================================
 	) {
-//		START_CLOCK(Fib_Write);
+//		MEASURE_BLOCK(Fib_Write);
 		auto Fib = NatToFib(gFibArray, Value + 1);
 		
 		while (Fib) {
@@ -1423,8 +1407,6 @@ namespace FibonacciCode {
 		}
 		
 		WriteBit(BitWriter, 1);
-		
-//		STOP_CLOCK(Fib_Write);
 	}
 	
 	//=============================================================================
@@ -1433,7 +1415,7 @@ namespace FibonacciCode {
 		iBitReader* BitReader
 	//=============================================================================
 	) {
-//		START_CLOCK(Fib_Read);
+//		MEASURE_BLOCK(Fib_Read);
 		
 		auto Fib = (tNat64)ReadBit(BitReader);
 		for (auto Pos = 1;; Pos += 1) {
@@ -1444,7 +1426,6 @@ namespace FibonacciCode {
 		
 		auto Result = FibToNat(Fib) - 1;
 		
-//		STOP_CLOCK(Fib_Read);
 		return Result;
 	}
 	
@@ -1463,7 +1444,351 @@ namespace FibonacciCode {
 #	endif
 }
 
+namespace Huffman {
+	// TODO: Sorting
+	using tCount_NodeIndex = struct {
+		tNat32 Count;
+		tNat32 NodeIndex;
+	};
+	
+	// TODO: why i need r eferences ??? (compiler bug?)
+	//=============================================================================
+	static inline
+	void CalculateBitCount(
+		tArray<tNat32>& SortedHistogramm,
+		tArray<tNat8>& BitCounts         // OUT
+	//=============================================================================
+	) {
+		ASSERT(SortedHistogramm.Size <= (1 << 17))
+		
+		// init
+		auto HistogrammSize = SortedHistogramm.Size;
+		auto NodeCount = 2*HistogrammSize - 1;
+		
+		auto NodeIds     = HeapAlloc<tNat32>(NodeCount);
+		auto ParentNodes = HeapAlloc<tNat32>(NodeCount);
+		auto Counts      = HeapAlloc<tNat32>(NodeCount);
+		
+		for (auto NodeId = NodeCount; NodeId --> 0;) {
+			NodeIds[NodeId] = (tNat32)NodeId;
+			ParentNodes[NodeId] = 0;
+			Counts[NodeId] = (NodeId < HistogrammSize) ? SortedHistogramm[NodeId] : 0;
+		}
+		
+		{ // build tree
+			auto I = (tNat32)0;
+			auto NewNodeId = (tNat32)HistogrammSize;
+			while (I <= NodeCount - 2) {
+				ASSERT(NewNodeId <= NodeCount)
+				auto NodeIdA = NodeIds[I + 0];
+				auto NodeIdB = NodeIds[I + 1];
+				ParentNodes[NodeIdA] = NewNodeId;
+				ParentNodes[NodeIdB] = NewNodeId;
+				
+				Counts[NewNodeId] = Counts[NodeIdA] + Counts[NodeIdB];
+				
+				// insert sort, one round
+				for (auto J = NewNodeId; J > I + 2; J -= 1) {
+					if (Counts[NodeIds[J + 0]] > Counts[NodeIds[J - 1]]) { break; }
+					Swap(&NodeIds[J + 0], &NodeIds[J - 1]);
+				}
+				
+				I += 2;
+				NewNodeId += 1;
+			}
+		}
+		
+		// get bit count
+		Counts[NodeCount - 1] = 0; // root
+		for (auto I = NodeCount - 1; I --> 0;) {
+			auto NodeId       = NodeIds[I];
+			auto ParentNodeId = ParentNodes[NodeId];
+			Counts[NodeId]    = Counts[ParentNodeId] + 1;
+			if (NodeId < HistogrammSize) {
+				BitCounts[NodeId] = Counts[NodeId];
+			}
+		}
+		
+		// clean up
+		HeapFree(ParentNodes);
+		HeapFree(NodeIds);
+		HeapFree(Counts);
+	}
+	
+	//=============================================================================
+	static inline
+	void CalculateBits(
+		tArray<tNat8>& BitCounts,
+		tArray<tNat32>& BitsArray  // OUT
+	//=============================================================================
+	) {
+		auto Bits = 0;
+		auto BitCount = 0;
+		for (auto NodeId = BitCounts.Size; NodeId --> 0;) {
+			auto NewBitCount = BitCounts[NodeId];
+			Bits <<= NewBitCount - BitCount;
+			BitCount = NewBitCount;
+			
+			BitsArray[NodeId] = Bits;
+			
+			Bits += 1;
+		}
+	}
+	
+	using tWriter = struct {
+		iBitWriter*    BitWriter;
+		tArray<tNat8>  BitCounts;
+		tArray<tNat32> Bits;
+	};
+	
+	//=============================================================================
+	static inline
+	tWriter Writer(
+		iBitWriter*    BitWriter,
+		tArray<tNat8>  BitCounts,
+		tArray<tNat32> Bits
+	//=============================================================================
+	) {
+		tWriter Result;
+		Result.BitWriter = BitWriter;
+		Result.BitCounts = BitCounts;
+		Result.Bits = Bits;
+		return Result;
+	}
+	
+	//=============================================================================
+	static inline
+	void Write(
+		tWriter* Writer,
+		tInt32   Id
+	//=============================================================================
+	) {
+		auto BitCount = Writer->BitCounts[Id];
+		auto Bits = Writer->Bits[Id];
+		while (BitCount --> 0) {
+			WriteBit(Writer->BitWriter, Bits & 0x1);
+			Bits >>= 1;
+		}
+	}
+	
+	using tReader = struct {
+		iBitReader*    BitReader;
+		tArray<tNat8>  BitCounts;
+		tArray<tNat32> Bits;
+	};
+	
+	//=============================================================================
+	static inline
+	tReader Read(
+		iBitReader*    BitReader,
+		tArray<tNat8>  BitCounts,
+		tArray<tNat32> Bits
+	//=============================================================================
+	) {
+		tReader Result;
+		Result.BitReader = BitReader;
+		Result.BitCounts = BitCounts;
+		Result.Bits = Bits;
+		return Result;
+	}
+	
+	//=============================================================================
+	static inline
+	tInt32 Read(
+		tReader* Reader
+	//=============================================================================
+	) {
+		auto BitCount = 0;
+		auto Bits = (tNat32)0x0;
+		for (auto I = Reader->BitCounts.Size; I --> 0;) {
+			if (Reader->BitCounts[I] > BitCount) {
+				Bits <<= 1;
+				Bits |= ReadBit(Reader->BitReader);
+				BitCount += 1;
+			}
+			
+			if (Bits == Reader->Bits[I]) {
+				return I;
+			}
+		}
+		ASSERT(false);
+	}
+	
+	//=============================================================================
+	static inline
+	void WriteHeader(
+		iBitWriter*    BitWriter,
+		tArray<tNat8>  BitCounts,
+		tArray<tNat32> Bits
+	//=============================================================================
+	) {
+		auto Count = BitCounts.Size;
+		FibonacciCode::Write(BitWriter, Count);
+		auto LastBitCount = 0;
+		for (auto I = (tNat32)0; I < Count; I += 1) {
+			auto BitCount = BitCounts[I];
+			auto Delta = BitCount - LastBitCount;
+			auto IsNeg = (Delta >> 8) & 1;
+			FibonacciCode::Write(BitWriter, (Delta << 1) ^ (0 - IsNeg));
+			LastBitCount = BitCount;
+			
+			auto Bits_ = Bits[I];
+			for (auto J = 0; J < BitCount; J += 1) {
+				WriteBit(BitWriter, (Bits_ >> (BitCount - J - 1)) & 1);
+			}
+		}
+	}
+	
+	//=============================================================================
+	static inline
+	void ReadHeader(
+		iBitReader*    BitReader,
+		tArray<tNat8>  BitCounts, // OUT
+		tArray<tNat32> Bits       // OUT
+	//=============================================================================
+	) {
+		auto BitCount = 0;
+		auto Count = Bits.Size;
+		for (auto I = (tNat32)0; I < Count; I += 1) {
+			auto Value = FibonacciCode::Read(BitReader);
+			auto IsNeg = Value & 1;
+			BitCount += (Value >> 1) ^ (0 - IsNeg);
+			BitCounts[I] = BitCount;
+			
+			auto Bits_ = 0x0;
+			for (auto J = BitCount; J --> 0; ) {
+				Bits_ <<= 1;
+				Bits_ |= ReadBit(BitReader);
+			}
+			Bits[I] = Bits_;
+		}
+	}
+	
+#	ifdef TEST
+		//=============================================================================
+		static inline
+		void TestCalcBitCount(
+		//=============================================================================
+		) {
+			tNat32 Histogram[]    = { 1, 1, 4, 4, 8, 20, 20, 20 };
+			//                         \2/  |  |  |   |   |   |
+			//                           \6/   |  |   |   |   |
+			//                             \10/   |   |   |   |
+			//                                \18/    |   |   |
+			//                                   \ 38/    |   |
+			//                                       \    \40/
+			//                                        \78/
+			tNat8 BitCountsRef[] = { 6, 6, 5, 4, 3,  2,  2,  2 };
+			tNat8 BitCountsRes[] = { 0, 0, 0, 0, 0,  0,  0,  0 };
+			tNat32 BitsRes[] = {        0,        0,       0,      0,     0,    0,    0,    0 };
+			tNat32 BitsRef[] = { 0b111111, 0b111110, 0b11110, 0b1110, 0b110, 0b10, 0b01, 0b00 };
+			
+			tArray<tNat32> InHistogramm = AsArray(Histogram);
+			
+			{
+				tArray<tNat8>  OutCounts    = AsArray(BitCountsRes);
+				CalculateBitCount(InHistogramm, OutCounts);
+				for (auto I = _countof(Histogram); I --> 0;) {
+					ASSERT(BitCountsRes[I] == BitCountsRef[I]);
+				}
+				
+				tArray<tNat32> OutBits      = AsArray(BitsRes);
+				CalculateBits(OutCounts, OutBits);
+				for (auto I = _countof(Histogram); I --> 0;) {
+					ASSERT(BitsRes[I] == BitsRef[I]);
+				}
+			}
+			
+			auto BitCount = (tNat32)0;
+			tNat32 In[] = { 0, 1, 2, 3, 4, 5, 6, 7};
+			
+			auto Bytes = HeapAlloc<tNat8>(1<<10);
+			{
+				auto MemoryWriter = MemoryStream::Writer(Bytes);
+				BitStream::tWriter BitWriter;
+				BitStream::Init(&BitWriter, &MemoryWriter);
+				auto BitWriter_ = BitStream::GetInterface(&BitWriter);
+				Huffman::WriteHeader(&BitWriter_, AsArray(BitCountsRef), AsArray(BitsRef));
+				FibonacciCode::Write(&BitWriter_, 7);
+				auto HuffmanWriter = Huffman::Writer(&BitWriter_, AsArray(BitCountsRef), AsArray(BitsRef));
+				for (auto I = 0; I < 7; I +=1) {
+					Huffman::Write(&HuffmanWriter, I);
+				}
+				Close(&BitWriter);
+				ByteStream::Close(&MemoryWriter);
+			}
+			for (auto I = _countof(BitCountsRef); I --> 0; ) {
+				BitCountsRes[I] = 0;
+				BitsRes[I] = 0;
+			}
+			{
+				auto MemoryReader = MemoryStream::Reader(Bytes);
+				BitStream::tReader BitReader;
+				BitStream::Init(&BitReader, &MemoryReader);
+				
+				auto BitReader_ = BitStream::GetInterface(&BitReader);
+				
+				auto Count = FibonacciCode::Read(&BitReader_);
+				auto OutCounts = HeapAlloc<tNat8>(Count);
+				auto OutBits = HeapAlloc<tNat32>(Count);
+				
+				Huffman::ReadHeader(&BitReader_, OutCounts, OutBits);
+				
+				for (auto I = _countof(BitCountsRef); I --> 0; ) {
+					ASSERT(BitCountsRef[I] == OutCounts[I]);
+					ASSERT(BitsRef[I] == OutBits[I]);
+				}
+				
+				HeapFree(OutBits);
+				HeapFree(OutCounts);
+				
+				Close(&BitReader);
+				
+				ByteStream::Close(&MemoryReader);
+			}
+			HeapFree(Bytes);
+		}
+		
+		//=============================================================================
+		static inline
+		void Test(
+		//=============================================================================
+		) {
+			TestCalcBitCount();
+		}
+#	endif
+}
+
 namespace HaarWavelet {
+	using tPair = struct {
+		tInt16 A;
+		tInt16 B;
+	};
+	
+	//=============================================================================
+	static inline
+	tPair EnCode(
+		tPair Src
+	//=============================================================================
+	) {
+		tPair Res;
+		Res.A = (Src.A + Src.B + 1) >> 1;
+		Res.B = Src.A - Src.B;
+		return Res;
+	}
+	
+	//=============================================================================
+	static inline
+	tPair DeCode(
+		tPair Src
+	//=============================================================================
+	) {
+		tPair Res;
+		Res.A = ((Src.A << 1) + Src.B) >> 1;
+		Res.B = ((Src.A << 1) - Src.B) >> 1;
+		return Res;
+	}
+	
 	using tQuad = struct {
 		tInt16 A;
 		tInt16 B;
@@ -1479,15 +1804,41 @@ namespace HaarWavelet {
 	) {
 		tQuad Res;
 #		if 1
-			Res.A = (Src.A + Src.B + Src.C + Src.D + 2)>>2;
+			Res.A = (Src.A + Src.B + Src.C + Src.D + 2) >> 2;
 			Res.B =  Src.A - Src.B + Src.C - Src.D;
 			Res.C =  Src.A + Src.B - Src.C - Src.D;
 			Res.D =  Src.A - Src.B - Src.C + Src.D;
+#		elif 0
+			Res.A = (Src.A + Src.B + Src.C + Src.D + 1) >> 1;
+			Res.B = (Src.A - Src.B + Src.C - Src.D + 0) >> 1;
+			Res.C = (Src.A + Src.B - Src.C - Src.D + 0) >> 1;
+			Res.D = (Src.A - Src.B - Src.C + Src.D + 0) >> 1;
+			
+			Res.D <<= 1;
+			Res.D |= Res.A & 1;
+			Res.A >>= 1;
+#		elif 1
+			Res.A = (Src.A + Src.B + Src.C + Src.D + 1) >> 1;
+			Res.B = (Src.A - Src.B + Src.C - Src.D + 0) >> 1;
+			Res.C = (Src.A + Src.B - Src.C - Src.D + 0) >> 1;
+			Res.D = (Src.A - Src.B - Src.C + Src.D + 0) >> 1;
 #		else
-			Res.A = (Src.A + Src.B + Src.C + Src.D + 2)>>2;
-			Res.B =  (Src.A - Src.B + Src.C - Src.D) >> 1;
-			Res.C =  (Src.A + Src.B - Src.C - Src.D) >> 1;
-			Res.D =  (Src.A - Src.B - Src.C + Src.D) >> 1;
+			tPair AB = { Src.A, Src.B };
+			tPair CD = { Src.C, Src.D };
+			
+			auto AB_ = EnCode(AB);
+			auto CD_ = EnCode(CD);
+			
+			tPair AC = { AB_.A, CD_.A };
+			tPair BD = { AB_.B, CD_.B };
+			
+			auto AC_ = EnCode(AC);
+			auto BD_ = EnCode(BD);
+			
+			Res.A = AC_.A;
+			Res.B = BD_.A;
+			Res.C = AC_.B;
+			Res.D = BD_.B;
 #		endif
 		return Res;
 	}
@@ -1500,15 +1851,41 @@ namespace HaarWavelet {
 	) {
 		tQuad Res;
 #		if 1
-			Res.A = ((Src.A<<2) + 1 + Src.B + Src.C + Src.D)>>2;
-			Res.B = ((Src.A<<2) + 1 - Src.B + Src.C - Src.D)>>2;
-			Res.C = ((Src.A<<2) + 1 + Src.B - Src.C - Src.D)>>2;
-			Res.D = ((Src.A<<2) + 1 - Src.B - Src.C + Src.D)>>2;
+			Res.A = ((Src.A << 2) + 1 + Src.B + Src.C + Src.D) >> 2;
+			Res.B = ((Src.A << 2) + 1 - Src.B + Src.C - Src.D) >> 2;
+			Res.C = ((Src.A << 2) + 1 + Src.B - Src.C - Src.D) >> 2;
+			Res.D = ((Src.A << 2) + 1 - Src.B - Src.C + Src.D) >> 2;
+#		elif 0
+			Src.A <<= 1;
+			Src.A |= Src.D & 1;
+			Res.D >>= 1;
+			
+			Res.A = (Src.A + Src.B + Src.C + Src.D + 1) >> 1;
+			Res.B = (Src.A - Src.B + Src.C - Src.D + 0) >> 1;
+			Res.C = (Src.A + Src.B - Src.C - Src.D + 0) >> 1;
+			Res.D = (Src.A - Src.B - Src.C + Src.D + 0) >> 1;
+#		elif 1
+			Res.A = (Src.A + Src.B + Src.C + Src.D + 1) >> 1;
+			Res.B = (Src.A - Src.B + Src.C - Src.D + 0) >> 1;
+			Res.C = (Src.A + Src.B - Src.C - Src.D + 0) >> 1;
+			Res.D = (Src.A - Src.B - Src.C + Src.D + 0) >> 1;
 #		else
-			Res.A = ((Src.A<<1) + 1 + Src.B + Src.C + Src.D)>>1;
-			Res.B = ((Src.A<<1) + 1 - Src.B + Src.C - Src.D)>>1;
-			Res.C = ((Src.A<<1) + 1 + Src.B - Src.C - Src.D)>>1;
-			Res.D = ((Src.A<<1) + 1 - Src.B - Src.C + Src.D)>>1;
+			tPair AC = { Src.A, Src.C };
+			tPair BD = { Src.B, Src.D };
+			
+			auto AC_ = DeCode(AC);
+			auto BD_ = DeCode(BD);
+			
+			tPair AB = { AC_.A, BD_.A };
+			tPair CD = { AC_.B, BD_.B };
+			
+			auto AB_ = DeCode(AB);
+			auto CD_ = DeCode(CD);
+			
+			Res.A = AB_.A;
+			Res.B = AB_.B;
+			Res.C = CD_.A;
+			Res.D = CD_.B;
 #		endif
 		return Res;
 	}
@@ -1519,13 +1896,41 @@ namespace HaarWavelet {
 		void Test(
 		//=============================================================================
 		) {
+			// 1-D
+			tPair Src1D;
+			
+			// #1: X != Y -> EnCode(X) != EnCode(Y)
+			for (Src1D.A = -2; Src1D.A < 2; Src1D.A += 1) {
+				for (Src1D.B = -2; Src1D.B < 2; Src1D.B += 1) {
+					auto Temp = EnCode(Src1D);
+					auto Res  = DeCode(Temp);
+					ASSERT(Src1D.A == Res.A);
+					ASSERT(Src1D.B == Res.B);
+				}
+			}
+			
+			// #2: X != Y -> DeCode(X) != DeCode(Y)
+			for (Src1D.A = -2; Src1D.A < 2; Src1D.A += 1) {
+				for (Src1D.B = -2; Src1D.B < 2; Src1D.B += 1) {
+					auto Temp = DeCode(Src1D);
+					auto Res  = EnCode(Temp);
+					ASSERT(Src1D.A == Res.A);
+					ASSERT(Src1D.B == Res.B);
+				}
+			}
+			
+			// #1 & #2 -> EnCode & DeCode sind eineindeutige Abbildungen -> kompakte Kodierung
+			
+			// 2-D
 			tQuad Src;
+			
+			// #1: X != Y -> EnCode(X) != EnCode(Y)
 			for (Src.A = -4; Src.A < 4; Src.A += 1) {
 				for (Src.B = -4; Src.B < 4; Src.B += 1) {
 					for (Src.C = -4; Src.C < 4; Src.C += 1) {
 						for (Src.D = -4; Src.D < 4; Src.D += 1) {
-							auto Temp = HaarWavelet::EnCode(Src);
-							auto Res = HaarWavelet::DeCode(Temp);
+							auto Temp = EnCode(Src);
+							auto Res  = DeCode(Temp);
 							ASSERT(Res.A == Src.A);
 							ASSERT(Res.B == Src.B);
 							ASSERT(Res.C == Src.C);
@@ -1534,6 +1939,27 @@ namespace HaarWavelet {
 					}
 				}
 			}
+			
+			#if 0
+			// #2: X != Y -> DeCode(X) != DeCode(Y)
+			for (Src.A = -4; Src.A < 4; Src.A += 1) {
+				for (Src.B = -4; Src.B < 4; Src.B += 1) {
+					for (Src.C = -4; Src.C < 4; Src.C += 1) {
+						for (Src.D = -4; Src.D < 4; Src.D += 1) {
+							auto Temp = DeCode(Src);
+							auto Res  = EnCode(Temp);
+							ASSERT(Res.A == Src.A);
+							ASSERT(Res.B == Src.B);
+							ASSERT(Res.C == Src.C);
+							ASSERT(Res.D == Src.D);
+							auto X = 0;
+						}
+					}
+				}
+			}
+			#endif
+			// #1 -> Verlustfrei
+			// #1 & #2 -> EnCode & DeCode sind eineindeutige Abbildungen -> kompakte Kodierung
 		}
 #	endif
 }
@@ -1709,7 +2135,7 @@ namespace Layer {
 		tLevel* DesLevel
 	//=============================================================================
 	) {
-		START_CLOCK(SplitWithQubPred);
+		MEASURE_BLOCK(SplitWithQubPred);
 		
 		auto SizeX    = (tInt32)SrcLevel->SizeXLeft;
 		auto SizeY    = (tInt32)SrcLevel->SizeYTop;
@@ -1884,8 +2310,6 @@ namespace Layer {
 				}
 			}
 		}
-		
-		STOP_CLOCK(SplitWithQubPred);
 	}
 	
 	//=============================================================================
@@ -1895,7 +2319,7 @@ namespace Layer {
 		tLevel* DesLevel
 	//=============================================================================
 	) {
-		START_CLOCK(ComposeWithQubPred);
+		MEASURE_BLOCK(ComposeWithQubPred);
 		
 		auto SizeX    = (tInt32)DesLevel->SizeXLeft;
 		auto SizeY    = (tInt32)DesLevel->SizeYTop;
@@ -2076,14 +2500,12 @@ namespace Layer {
 				}
 			}
 		}
-		
-		STOP_CLOCK(ComposeWithQubPred);
 	}
 	
-#	ifdef TEST_
+#	ifdef TEST
 		//=============================================================================
 		static inline
-		void Test(
+		void TestSplitAndCompose(
 		//=============================================================================
 		) {
 			const tInt32 SizeMax = 128;
@@ -2095,27 +2517,60 @@ namespace Layer {
 			tInt16 V[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
 			tInt16 D[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
 			
+			tLevel SmallLevel;
+			SmallLevel.SizeXLeft   = SizeMax/2;
+			SmallLevel.SizeXRight  = SizeMax/2;
+			SmallLevel.SizeYTop    = SizeMax/2;
+			SmallLevel.SizeYBottom = SizeMax/2;
+			SmallLevel.S = S;
+			SmallLevel.H = H;
+			SmallLevel.V = V;
+			SmallLevel.D = D;
+			SmallLevel.Pitch = SizeMax/2 + DeltaPitch;
+			
+			tLevel BigLevel;
+			BigLevel.SizeXLeft   = SizeMax;
+			BigLevel.SizeXRight  = SizeMax;
+			BigLevel.SizeYTop    = SizeMax;
+			BigLevel.SizeYBottom = SizeMax;
+			BigLevel.S = Big;
+			BigLevel.H = NULL;
+			BigLevel.V = NULL;
+			BigLevel.D = NULL;
+			BigLevel.Pitch = SizeMax + DeltaPitch;
+			
+			auto CalcPixel = [](tNat32 X, tNat32 Y, tNat32 I) { return (((X+257) * (Y+263) * I) % 251); };
+			
 			for (auto I = 1; I < 500; I += 1) {
 				for (auto Y = 0; Y < SizeMax; Y += 1) {
 					for (auto X = 0; X < SizeMax; X += 1) {
-						Big[X + Y*SizeMax] = ((X+257) * (Y+263) * I) % 251;
+						Big[X + Y*SizeMax] = (tNat16)CalcPixel(X, Y, I);
 					}
 				}
 				
 				for (auto Size = 2; Size <= SizeMax; Size <<= 1) {
-					SplitWithQubPred  (Size, Size, Size+DeltaPitch, Size/2+DeltaPitch, Big, S, H, V, D);
-					ComposeWithQubPred(Size, Size, Size+DeltaPitch, Size/2+DeltaPitch, Big, S, H, V, D);
+					SplitWithQubPred  (&BigLevel, &SmallLevel);
+					ComposeWithQubPred(&SmallLevel, &BigLevel);
 					
 					for (auto Y = 0; Y < SizeMax; Y += 1) {
 						for (auto X = 0; X < SizeMax; X += 1) {
 							auto A = Big[X + Y*SizeMax];
-							auto B = ((X+257) * (Y+263) * I) % 251;
+							auto B = (tNat16)CalcPixel(X, Y, I);
 							ASSERT(A == B);
 						}
 					}
 				}
 			}
 		}
+		
+		//=============================================================================
+		static inline
+		void Test(
+		//=============================================================================
+		) {
+			TestSplitAndCompose();
+		}
+
 #	endif
 }
 
@@ -2186,7 +2641,7 @@ namespace BmpHelper {
 		Layer::tLevel* LayerCo
 	//=============================================================================
 	) {
-		START_CLOCK(GetLayerFromBmp16)
+//		MEASURE_BLOCK(GetLayerFromBmp16)
 		
 		auto MaskR = 0x00007C00u;
 		auto MaskG = 0x000003E0u;
@@ -2203,7 +2658,7 @@ namespace BmpHelper {
 		
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto RowSize = (tSize)(2*SizeX + 3) & (~3);
-		auto Row = (tNat16*)malloc(RowSize); // TODO: use FixSize row to skip malloc
+		auto Row = (tNat16*)malloc(RowSize);
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*SizeX + X;
@@ -2221,7 +2676,6 @@ namespace BmpHelper {
 			}
 		}
 		free(Row);
-		STOP_CLOCK(GetLayerFromBmp16)
 	}
 	
 	//=============================================================================
@@ -2235,11 +2689,12 @@ namespace BmpHelper {
 		Layer::tLevel* LayerCo
 	//=============================================================================
 	) {
-		START_CLOCK(GetLayerFromBmp24);
+		MEASURE_BLOCK(GetLayerFromBmp24);
+		
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)((3*SizeX + 3) & (~3));
-		auto Row = (tNat8*)malloc(RowSize); // TODO: use FixSize row to skip malloc
+		auto Row = (tNat8*)malloc(RowSize);
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			auto I = 0;
 			for (auto X = 0; X < SizeX; X += 1) {
@@ -2258,8 +2713,6 @@ namespace BmpHelper {
 			}
 		}
 		free(Row);
-		
-		STOP_CLOCK(GetLayerFromBmp24);
 	}
 	
 	//=============================================================================
@@ -2273,7 +2726,7 @@ namespace BmpHelper {
 		Layer::tLevel* LayerCo
 	//=============================================================================
 	) {
-		START_CLOCK(GetLayerFromBmp32);
+		MEASURE_BLOCK(GetLayerFromBmp32);
 		
 		auto MaskR = 0x00FF0000u;
 		auto MaskG = 0x0000FF00u;
@@ -2290,7 +2743,7 @@ namespace BmpHelper {
 		
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto RowSize = (tSize)(4*SizeX);
-		auto Row = (tNat32*)malloc(RowSize); // TODO: use FixSize row to skip malloc
+		auto Row = (tNat32*)malloc(RowSize);
 		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*SizeX + X;
@@ -2308,8 +2761,6 @@ namespace BmpHelper {
 			}
 		}
 		free(Row);
-		
-		STOP_CLOCK(GetLayerFromBmp32);
 	}
 	
 	//=============================================================================
@@ -2323,7 +2774,7 @@ namespace BmpHelper {
 		Layer::tLevel* LayerCo
 	//=============================================================================
 	) {
-		START_CLOCK(PutLayerToBmp32);
+		MEASURE_BLOCK(PutLayerToBmp32);
 		
 		tNat32 Mask[3];
 		auto MaskR = Mask[0] = 0x00FF0000u; // R
@@ -2343,7 +2794,7 @@ namespace BmpHelper {
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)(4*SizeX);
-		auto Row = (tNat32*)malloc(RowSize); // TODO: use FixSize row to skip malloc
+		auto Row = (tNat32*)malloc(RowSize);
 		for (auto Y = 0; Y < BmpInfoHeader.SizeY; Y += 1) {
 			for (auto X = 0; X < SizeX; X += 1) {
 				auto J = Y*Pitch + X;
@@ -2360,25 +2811,23 @@ namespace BmpHelper {
 				auto R = (RB - Co + 1) >> 1;
 				
 				auto Value = (
-					Min(Max(0, R), 255) << ShiftR |
-					Min(Max(0, G), 255) << ShiftG |
-					Min(Max(0, B), 255) << ShiftB |
-					Min(Max(0, A), 255) << ShiftA
+					Min<tNat32>(Max<tInt32>(0, R), 255) << ShiftR |
+					Min<tNat32>(Max<tInt32>(0, G), 255) << ShiftG |
+					Min<tNat32>(Max<tInt32>(0, B), 255) << ShiftB |
+					Min<tNat32>(Max<tInt32>(0, A), 255) << ShiftA
 				);
 				Row[X] = Value;
 			}
 			fwrite(Row, RowSize, 1, StreamOut);
 		}
 		free(Row);
-		
-		STOP_CLOCK(PutLayerToBmp32);
 	}
 }
 
 using iCurve = struct {
 	void* Env;
 	tFunc3<void*, tNat32, tNat32, void>* Init;
-	tFunc1<void*, void>* Next;
+	tFunc1<void*, void>*   Next;
 	tFunc1<void*, tNat32>* GetX;
 	tFunc1<void*, tNat32>* GetY;
 };
@@ -2684,7 +3133,7 @@ namespace HilbertCurve {
 		tState* State
 	//=============================================================================
 	) {
-//		START_CLOCK(HilbertCurve_Next);
+//		MEASURE_BLOCK(HilbertCurve_Next);
 		
 		auto RemovedLevels = 0;
 		while (StepNumber(State->Stack) == End) {
@@ -2714,8 +3163,6 @@ namespace HilbertCurve {
 				ASSERT(false);
 			}
 		}
-		
-//		STOP_CLOCK(HilbertCurve_Next);
 	}
 	
 	//=============================================================================
@@ -2805,15 +3252,15 @@ namespace HilbertCurve {
 //=============================================================================
 static
 void WriteLayer(
-	BufferdStream::tWriter* Stream,
-	tInt16*                 DataPtr,
-	tNat32                  SizeX,
-	tNat32                  SizeY,
-	tNat32                  Pitch,
-	tNat32                  Compression
+	ByteStream::tWriter* Stream,
+	tInt16*              DataPtr,
+	tNat32               SizeX,
+	tNat32               SizeY,
+	tNat32               Pitch,
+	tNat32               Compression
 //=============================================================================
 ) {
-	START_CLOCK(WriteLayer);
+	MEASURE_BLOCK(WriteLayer);
 	
 	BitStream::tWriter BitWriter;
 	BitStream::Init(&BitWriter, Stream);
@@ -2840,7 +3287,7 @@ void WriteLayer(
 	auto CompressionOffset = (1 << Compression) >> 1;
 	
 	tNat32 HistValues[1<<15] = {};
-	tNat32 HistZeros[16] = {};
+	tNat32 HistZeros[1<<15] = {};
 	
 	for (auto I = (tNat32)0; I < SizeX*SizeY;) {
 		auto X = GetX(&Curve);
@@ -2877,7 +3324,7 @@ void WriteLayer(
 	
 	if (Zeros) {
 		HistValues[0] += Zeros;
-		HistZeros[UsedBits(Zeros)] += 1;
+		HistZeros[Min<tNat32>(Zeros, (1<<15) - 1)] += 1;
 		if (Zeros == 1) {
 			WriteNat(&BitWriterInterface, 0);
 		} else {
@@ -2888,36 +3335,38 @@ void WriteLayer(
 	
 	Close(&BitWriterInterface);
 	
-	fprintf(gLogStream, "\n\n");
-	fprintf(gLogStream, "%d x %d\n", SizeX, SizeY);
-	for (auto Value = 0; Value < 1<<15; Value += 1) {
-		auto Count = HistValues[Value];
-		if (Count > 0) {
-			fprintf(gLogStream, "V %d %d\n", Value, Count);
+	{
+		MEASURE_BLOCK(WriteLayer_ShowHistogram);
+		
+		fprintf(gLogStream, "\n\n");
+		fprintf(gLogStream, "%d x %d\n", SizeX, SizeY);
+		for (auto Value = 0; Value < 1<<15; Value += 1) {
+			auto Count = HistValues[Value];
+			if (Count > 0) {
+				fprintf(gLogStream, "V %d %d\n", Value, Count);
+			}
+		}
+		fprintf(gLogStream, "--\n");
+		for (auto Repeates = 0; Repeates < 1<<15; Repeates += 1) {
+			auto Count = HistZeros[Repeates];
+			if (Count > 0) {
+				fprintf(gLogStream, "Z %d %d\n", Repeates, Count);
+			}
 		}
 	}
-	fprintf(gLogStream, "--\n");
-	for (auto Bits = 0; Bits < 16; Bits += 1) {
-		auto Count = HistZeros[Bits];
-		if (Count > 0) {
-			fprintf(gLogStream, "Z %d %d\n", Bits, Count);
-		}
-	}
-	
-	STOP_CLOCK(WriteLayer);
 }
 
 //=============================================================================
 static
 void ReadLayer(
-	BufferdStream::tReader* Stream,
-	tInt16*                 DataPtr,
-	tNat32                  SizeX,
-	tNat32                  SizeY,
-	tNat32                  Pitch
+	ByteStream::tReader* Stream,
+	tInt16*              DataPtr,
+	tNat32               SizeX,
+	tNat32               SizeY,
+	tNat32               Pitch
 //=============================================================================
 ) {
-	START_CLOCK(ReadLayer);
+	MEASURE_BLOCK(ReadLayer);
 	
 	BitStream::tReader BitStream;
 	BitStream::Init(&BitStream, Stream);
@@ -2946,12 +3395,12 @@ void ReadLayer(
 		auto Y = GetY(&Curve);
 		if (X < SizeX && Y < SizeY) {
 			I += 1;
-			tNat32 Sign;
+			tInt32 Sign;
 			tNat64 Value;
 			if (Zeros) {
 				Zeros -= 1;
-				Sign = (tNat32)1;
-				Value = (tNat64)0;
+				Sign = 1;
+				Value = 0;
 			} else if (WasLastZero) {
 				Value = ReadNat(&BitReaderInterface);
 				Sign = (Value & 1) ? -1 : 1;
@@ -2972,18 +3421,16 @@ void ReadLayer(
 	}
 	
 	Close(&BitReaderInterface);
-	
-	STOP_CLOCK(ReadLayer);
 }
 
 //=============================================================================
 void EnCode(
-	tStream*                StreamIn,
-	BufferdStream::tWriter* StreamOut,
-	tNat32                  Compression
+	tStream*             StreamIn,
+	ByteStream::tWriter* StreamOut,
+	tNat32               Compression
 //=============================================================================
 ) {
-	START_CLOCK(EnCode);
+	MEASURE_BLOCK(EnCode);
 	
 	char MagicString[2];
 	if (!fread(&MagicString, sizeof(MagicString), 1, StreamIn)) {
@@ -3087,7 +3534,7 @@ void EnCode(
 			for (auto Layer = (tNat32)0; Layer < LayerCount; Layer += 1) {
 				auto LayerTemp = Layers[Layer][Level];
 				
-				auto Compression_ = Max(0, Level - InitLevel + Compression - 2*(Layer == 1));
+				auto Compression_ = Max<tInt32>(0, Level - InitLevel + Compression - 2*(Layer == 1));
 				
 				WriteLayer(StreamOut, LayerTemp.H, SizeXRight, SizeYTop,    Pitch, Compression_);
 				WriteLayer(StreamOut, LayerTemp.V, SizeXLeft,  SizeYBottom, Pitch, Compression_);
@@ -3095,17 +3542,15 @@ void EnCode(
 			}
 		}
 	}
-	
-	STOP_CLOCK(EnCode);
 }
 
 //=============================================================================
 void DeCode(
-	BufferdStream::tReader* StreamIn,
-	tStream*                StreamOut
+	ByteStream::tReader* StreamIn,
+	tStream*             StreamOut
 //=============================================================================
 ) {
-	START_CLOCK(DeCode);
+	MEASURE_BLOCK(DeCode);
 	
 	BitStream::tReader BitReader;
 	BitStream::Init(&BitReader, StreamIn);
@@ -3118,7 +3563,7 @@ void DeCode(
 	auto LayerCount = 4u;
 	auto InitLevel = 0;
 	{
-		auto BufferSize = 4 * SizeX * Max(SizeY, 8);
+		auto BufferSize = 4 * SizeX * Max<tNat32>(SizeY, 8);
 		auto Buffer = (tInt16*)malloc(LayerCount * BufferSize * sizeof(tInt16));
 		
 		{
@@ -3203,8 +3648,6 @@ void DeCode(
 		
 		BmpHelper::PutLayerToBmp32(StreamOut, BmpInfoHeader, &Layers[0][InitLevel], &Layers[1][InitLevel], &Layers[2][InitLevel], &Layers[3][InitLevel]);
 	}
-	
-	STOP_CLOCK(DeCode);
 }
 
 #ifdef TEST
@@ -3213,14 +3656,14 @@ void DeCode(
 	void Test(
 	//=============================================================================
 	) {
+		TestArray();
 		HaarWavelet::Test();
 		HilbertCurve::Test();
 		FibonacciCode::Test();
 		Huffman::Test();
-//TODO		Layer::Test();
+		Layer::Test();
 	}
 #endif
-
 
 //=============================================================================
 int main(
@@ -3239,7 +3682,7 @@ int main(
 			
 			Test();
 			if (ArgCount == 2) {
-				exit(-1);
+				exit(0);
 			}
 			ArgCount -= 1;
 			Args = &Args[1];
@@ -3277,19 +3720,29 @@ int main(
 	if (strncmp(Flag, "-e", 2) == 0) {
 		BufferdStream::tWriter BufferdStreamOut;
 		BufferdStream::Init(&BufferdStreamOut, StreamOut);
-		EnCode(StreamIn, &BufferdStreamOut, atoi(&Flag[2]));
+		auto x = ByteStream::Writer(
+			&BufferdStreamOut,
+			[] (void* Env, tNat32 Byte) { BufferdStream::WriteByte((BufferdStream::tWriter*)Env, Byte); },
+			[] (void* Env) { BufferdStream::Close((BufferdStream::tWriter*)Env); }
+		);
+		EnCode(StreamIn, &x, atoi(&Flag[2]));
 		BufferdStream::Close(&BufferdStreamOut);
 	} else
 	if (strncmp(Flag, "-d", 2) == 0) {
 		BufferdStream::tReader BufferdStreamIn;
 		BufferdStream::Init(&BufferdStreamIn, StreamIn);
-		DeCode(&BufferdStreamIn, StreamOut);
+		auto x = ByteStream::Reader(
+			&BufferdStreamIn,
+			[] (void* Env) { return BufferdStream::ReadByte((BufferdStream::tReader*)Env); },
+			[] (void* Env) { BufferdStream::Close((BufferdStream::tReader*)Env); }
+		);
+		DeCode(&x, StreamOut);
 		BufferdStream::Close(&BufferdStreamIn);
 	}
 	
 	STOP_CLOCK(main);
 #	ifdef VS
-		PRINT_CLOCKS(fopen("C:\\Projekte\\ImgCodec2015\\bin\\timer.txt", "wb"));
+		PRINT_CLOCKS(fopen("C:\\Projekte\\ImgCodec2015\\bin\\timer.txt", "w"));
 #	else
 		PRINT_CLOCKS(gLogStream);
 #	endif
