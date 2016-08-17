@@ -1,3 +1,5 @@
+#pragma warning(push, 0)
+
 #include <stdio.h> // fopen(...), fclose(...), fread(...), fwrite(...), fflush(...), fprintf(...)
 #include <string.h> // strncmp(...)
 #include <stdlib.h> // exit(...)
@@ -17,30 +19,37 @@
 #	endif
 #endif
 
+#pragma warning( pop )
+
 // TODO-List:
 // ==========
+// - remove all arrays by tArray
+// - StackBased-MemoryManager (replace malloc and free)
+// - DependencyInjection for MemoryManagment
 // - Huffman vs Fibonacci
 // - Parallel
 // - ContainerFormat
-// - StackBased-MemoryManager (replace malloc and free)
-// - DependencyInjection for MemoryManagment
 
 using tBool = bool;
 
-using tChar8 = char;
-
-using tNat8  = unsigned char;
+using tNat1 = unsigned char;
+using tNat8 = unsigned char;
 using tNat16 = unsigned short;
 using tNat32 = unsigned int;
 using tNat64 = unsigned long long;
 
-using tInt8  = signed char;
+using tInt8 = signed char;
 using tInt16 = signed short;
 using tInt32 = signed int;
 using tInt64 = signed long long;
 
 using tReal32 = float;
 using tReal64 = double;
+
+const tBool cTrue = true;
+const tBool cFalse = false;
+
+using tChar8 = char;
 
 template <typename gRes>
 using tFunc0 = gRes();
@@ -90,7 +99,8 @@ static tStream* gLogStream = NULL;
 #					pragma GCC diagnostic push
 #					pragma GCC diagnostic ignored "-Wdiv-by-zero"
 #				endif
-				fprintf(gLogStream, "%d", LineNr / 0);
+				LineNr /= 0;
+				exit(-1);
 #				ifndef VS
 #					pragma GCC diagnostic pop
 #				endif
@@ -114,12 +124,12 @@ g Abs(
 
 //=============================================================================
 static inline
-tInt32 Sign(
+tInt8 Sign(
 	tInt64 Value
 //=============================================================================
 ) {
 	if (Value == 0) { return 0; }
-	return (tNat32)(Value >> 63);
+	return Value >> 63;
 }
 
 //=============================================================================
@@ -146,11 +156,11 @@ g Max(
 
 //=============================================================================
 static inline
-tNat64 UsedBits(
+tNat8 UsedBits(
 	tNat64 Nat
 //=============================================================================
 ) {
-	auto Bits = 0;
+	auto Bits = (tNat8)0;
 	for (auto Temp = Nat; Temp > 0; Temp >>= 1) {
 		Bits += 1;
 	}
@@ -172,20 +182,35 @@ void Swap(
 
 template <typename g>
 struct tArray final {
-	tNat32 Size;
 	g*     Values;
+	tNat32 Size;
+	tNat8  _[4];
+
+	tArray(
+	) {
+		this->Size = 0;
+		this->Values = NULL;
+	}
 	
-	g& operator[] (const tNat64);
+	tArray(
+		tNat32 Size,
+		g* Values
+	) {
+		this->Size = Size;
+		this->Values = Values;
+	}
+	
+	g& operator[] (tNat64);
 };
 
 //=============================================================================
 template <typename g>
 inline
 g& tArray<g>::operator[] (
-	const tNat64 Index
+	tNat64 Index
 //=============================================================================
 ) {
-	ASSERT(0 <= Index && Index < Size);
+	ASSERT(Index < this->Size);
 	return this->Values[Index];
 }
 
@@ -218,9 +243,45 @@ tArray<g> Skip(
 //=============================================================================
 template<typename g>
 static inline
+tArray<g> MemAlloc(
+	tArray<tNat8>& Buffer,
+	tNat32         Size
+//=============================================================================
+) {
+	auto Bytes = (tNat32)(sizeof(g) * Size);
+	
+	ASSERT(Bytes <= Buffer.Size);
+	
+	tArray<g> Result;
+	Result.Size = Size;
+	Result.Values = (Size == 0) ? NULL : (g*)Buffer.Values;
+	
+	Buffer.Values += Bytes;
+	Buffer.Size -= Bytes;
+	
+	return Result;
+}
+
+//=============================================================================
+template<typename g>
+static inline
+void MemZero(
+	g* Buffer,
+	tNat32 Count
+//=============================================================================
+) {
+	// TODO: performance
+	for (auto I = (tNat32)(sizeof(g) * Count); I --> 0; ) {
+		((tNat8*)Buffer)[I] = 0;
+	}
+}
+
+//=============================================================================
+template<typename g>
+static inline
 void InPlaceQuickSort(
-	tArray<g>             Nodes,
-	tFunc2<g, g, tInt32>* Comp
+	tArray<g>            Nodes,
+	tFunc2<g, g, tInt8>* Comp
 //=============================================================================
 ) {
 	if (Nodes.Size <= 1) {
@@ -228,8 +289,8 @@ void InPlaceQuickSort(
 	}
 	
 	auto Pivot = Nodes[Nodes.Size >> 1];
-	auto Low   = (tInt32)0;
-	auto Hight = (tInt32)(Nodes.Size - 1);
+	auto Low   = (tNat32)0;
+	auto Hight = (tNat32)(Nodes.Size - 1);
 	
 	for (;;) {
 		while (Comp(Nodes[Low  ], Pivot) > 0 && Low != Hight) { Low   += 1; }
@@ -301,13 +362,13 @@ void InPlaceQuickSort(
 		};
 		tArray<tNat32> Array = AsArray(Buffer);
 		auto CountIndex = (tNat32)0;
-		auto Comp = (tFunc2<tNat32, tNat32, tInt32>*) [](tNat32 A, tNat32 B) { return (tInt32)A - (tInt32)B; };
+		auto Comp = (tFunc2<tNat32, tNat32, tInt8>*) [](tNat32 A, tNat32 B) { return Sign((tInt64)A - (tInt64)B); };
 		while (CountIndex < Array.Size) {
 			auto Count = Array[CountIndex];
 			auto T = Take(Skip(Array, CountIndex + 1        ), Count);
 			auto R = Take(Skip(Array, CountIndex + 1 + Count), Count);
 			InPlaceQuickSort(T, Comp);
-			for (auto I = Count; I --> 0;) {
+			for (auto I = Count; I --> 0; ) {
 				ASSERT(T[I] == R[I]);
 			}
 			CountIndex += 2*Count + 1;
@@ -333,9 +394,9 @@ void InPlaceQuickSort(
 	namespace Clock {
 		
 		using tClock = struct {
-			tNat64 Begin;
-			tNat64 Duration;
-			tNat64 Count;
+			tNat64 Begin    = 0;
+			tNat64 Duration = 0;
+			tNat64 Count    = 0;
 		};
 		
 		namespace Id {
@@ -425,7 +486,7 @@ void InPlaceQuickSort(
 			tNat32 Id
 		//=============================================================================
 		) {
-			if (gClocks[Id].Begin) {
+			if (gClocks[Id].Begin != 0) {
 				gClocks[Id].Duration += clock() - gClocks[Id].Begin;
 				gClocks[Id].Begin = 0;
 				gClocks[Id].Count += 1;
@@ -433,7 +494,7 @@ void InPlaceQuickSort(
 		}
 		
 		class tMeasure final {
-			tNat32 _Id;
+			tNat32 _Id = 0;
 			
 			public:
 			//=============================================================================
@@ -494,23 +555,26 @@ void InPlaceQuickSort(
 			ADD_CLOCK(ReadByte_fread);
 #			undef ADD_CLOCK
 			
+			const auto c1k = (tNat64)1000;
+			const auto c10k = (tNat64)10000;
+			
 			for (auto I = (tNat32)0; I < Id::MaxClocks; I += 1) {
 				auto Count = Clock::gClocks[I].Count;
-				if (Count) {
+				if (Count != 0) {
 					auto Duration = Clock::gClocks[I].Duration;
 					auto Mean = Duration / Count;
 					
 					auto CountUnit = "";
-					if (Count > 10000) { Count /= 1000; CountUnit = "k"; }
-					if (Count > 10000) { Count /= 1000; CountUnit = "M"; }
+					if (Count > c10k) { Count /= c1k; CountUnit = "k"; }
+					if (Count > c10k) { Count /= c1k; CountUnit = "M"; }
 					
 					auto DuratuonUnit = "";
-					if (Duration > 10000) { Duration /= 1000; DuratuonUnit = "k"; }
-					if (Duration > 10000) { Duration /= 1000; DuratuonUnit = "M"; }
+					if (Duration > c10k) { Duration /= c1k; DuratuonUnit = "k"; }
+					if (Duration > c10k) { Duration /= c1k; DuratuonUnit = "M"; }
 					
 					auto MeanUnit = "";
-					if (Mean > 10000) { Mean /= 1000; MeanUnit = "k"; }
-					if (Mean > 10000) { Mean /= 1000; MeanUnit = "M"; }
+					if (Mean > c10k) { Mean /= c1k; MeanUnit = "k"; }
+					if (Mean > c10k) { Mean /= c1k; MeanUnit = "M"; }
 					
 					if (Names[I]) {
 						fprintf(Stream, "ClockId %s: ", Names[I]);
@@ -543,7 +607,7 @@ tArray<g> HeapAlloc(
 ) {
 	tArray<g> Result;
 	Result.Values = (g*)malloc(Count*sizeof(g));
-	Result.Size = Count;
+	Result.Size = (tNat32)Count;
 	return Result;
 }
 
@@ -576,17 +640,17 @@ void HeapFree(
 
 namespace ByteStream {
 	using tReader = struct {
-		void*                  Env;
-		tFunc1<void*, tNat32>* ReadByte;
-		tFunc1<void*, void>*   Close;
+		void*                 Env;
+		tFunc1<void*, tNat8>* ReadByte;
+		tFunc1<void*, void>*  Close;
 	};
 	
 	//=============================================================================
 	static inline
 	tReader Reader(
-		void* Env,
-		tFunc1<void*, tNat32>* ReadByte,
-		tFunc1<void*, void>* Close
+		void*                 Env,
+		tFunc1<void*, tNat8>* ReadByte,
+		tFunc1<void*, void>*  Close
 	//=============================================================================
 	) {
 		tReader Result;
@@ -597,17 +661,17 @@ namespace ByteStream {
 	}
 	
 	using tWriter = struct {
-		void*                        Env;
-		tFunc2<void*, tNat32, void>* WriteByte;
-		tFunc1<void*, void>*         Close;
+		void*                       Env;
+		tFunc2<void*, tNat8, void>* WriteByte;
+		tFunc1<void*, void>*        Close;
 	};
 
 	//=============================================================================
 	static inline
 	tWriter Writer(
-		void* Env,
-		tFunc2<void*, tNat32, void>* WriteByte,
-		tFunc1<void*, void>* Close
+		void*                       Env,
+		tFunc2<void*, tNat8, void>* WriteByte,
+		tFunc1<void*, void>*        Close
 	//=============================================================================
 	) {
 		tWriter Result;
@@ -619,7 +683,7 @@ namespace ByteStream {
 	
 	//=============================================================================
 	static inline
-	tNat32 Read (
+	tNat8 Read (
 		ByteStream::tReader* Reader
 	//=============================================================================
 	) {
@@ -639,7 +703,7 @@ namespace ByteStream {
 	static inline
 	void Write (
 		ByteStream::tWriter* Writer,
-		tNat32         Byte
+		tNat8                Byte
 	//=============================================================================
 	) {
 		Writer->WriteByte(Writer->Env, Byte);
@@ -657,8 +721,9 @@ namespace ByteStream {
 
 namespace MemoryStream {
 	using tReader = struct {
-		tNat32 Count;
 		tArray<tNat8> Bytes;
+		tNat32        Count;
+		tNat8         _[4];
 	};
 	
 	//=============================================================================
@@ -677,7 +742,7 @@ namespace MemoryStream {
 				ASSERT(Reader->Count < Reader->Bytes.Size);
 				auto Byte = Reader->Bytes[Reader->Count];
 				Reader->Count += 1;
-				return (tNat32)Byte;
+				return Byte;
 			},
 			[](void* Env) {
 				HeapFree((tReader*)Env);
@@ -686,8 +751,9 @@ namespace MemoryStream {
 	}
 	
 	using tWriter = struct {
-		tNat32 Count;
 		tArray<tNat8> Bytes;
+		tNat32        Count;
+		tNat8         _[4];
 	};
 	
 	//=============================================================================
@@ -701,10 +767,10 @@ namespace MemoryStream {
 		Env->Count = 0;
 		return ByteStream::Writer(
 			(void*)Env,
-			[](void* Env, tNat32 Byte) {
+			[](void* Env, tNat8 Byte) {
 				auto Writer = (tWriter*)Env;
 				ASSERT(Writer->Count < Writer->Bytes.Size);
-				Writer->Bytes[Writer->Count] = (tNat8)Byte;
+				Writer->Bytes[Writer->Count] = Byte;
 				Writer->Count += 1;
 			},
 			[](void* Env) {
@@ -760,46 +826,46 @@ namespace BufferdStream {
 	) {
 //		MEASURE_BLOCK(WriteByte);
 		
-		const tNat32 BufferSize = sizeof(Stream->Buffer);
+		const auto cBufferSize = (tNat32)sizeof(Stream->Buffer);
 		auto Pos = Stream->Pos;
 		Stream->Buffer[Pos] = Byte;
-		Pos = (Pos + 1) % BufferSize;
+		Pos = (Pos + 1) % cBufferSize;
 		if (Pos == 0) {
 //			MEASURE_BLOCK(WriteByte_fwrite);
-			fwrite(Stream->Buffer, BufferSize, 1, Stream->Stream);
+			fwrite(Stream->Buffer, cBufferSize, 1, Stream->Stream);
 		}
 		Stream->Pos = Pos;
 	}
 	
 	static inline
 	//=============================================================================
-	tNat32 ReadByte(
+	tNat8 ReadByte(
 		tReader* Stream
 	//=============================================================================
 	) {
 		MEASURE_BLOCK(ReadByte);
 		
-		const tNat32 BufferSize = sizeof(Stream->Buffer);
+		const auto cBufferSize = (tNat32)sizeof(Stream->Buffer);
 		auto Pos = Stream->Pos;
 		if (Pos == 0) {
 //			START_CLOCK(ReadByte_fread);
-			auto Bytes = (tNat32)fread(Stream->Buffer, 1, BufferSize, Stream->Stream);
+			auto Bytes = (tNat32)fread(Stream->Buffer, 1, cBufferSize, Stream->Stream);
 //			STOP_CLOCK(ReadByte_fread);
 			if (Bytes == 0) {
-				return -1; // TODO: Fehlerbehandlung
+				return 0; // TODO: Fehlerbehandlung
 			}
-			if (Bytes != BufferSize) {
-				auto Des = BufferSize;
+			if (Bytes != cBufferSize) {
+				auto Des = cBufferSize;
 				auto Src = Bytes;
 				while (Src > 0) {
 					Des -= 1;
 					Src -= 1;
 					Stream->Buffer[Des] = Stream->Buffer[Src];
 				}
-				Pos = BufferSize - Bytes;
+				Pos = cBufferSize - Bytes;
 			}
 		}
-		Stream->Pos = (Pos + 1) % BufferSize;
+		Stream->Pos = (Pos + 1) % cBufferSize;
 		auto Result =  Stream->Buffer[Pos];
 		
 		return Result;
@@ -830,14 +896,14 @@ namespace BufferdStream {
 }
 
 using iBitReader = struct {
-	tFunc1<void*, tNat32>* ReadBit;
-	tFunc1<void*, void>*   Close;
-	void*                  Context;
+	tFunc1<void*, tNat1>* ReadBit;
+	tFunc1<void*, void>*  Close;
+	void*                 Context;
 };
 
 //=============================================================================
 static inline
-tNat32 ReadBit(
+tNat1 ReadBit(
 	iBitReader* BitReader
 //=============================================================================
 ) {
@@ -855,16 +921,16 @@ void Close(
 }
 
 using iBitWriter = struct {
-	tFunc2<void*, tNat32, void>* WriteBit;
-	tFunc1<void*, void>*         Close;
-	void*                        Context;
+	tFunc2<void*, tNat1, void>* WriteBit;
+	tFunc1<void*, void>*        Close;
+	void*                       Context;
 };
 
 //=============================================================================
 static inline
 void WriteBit(
 	iBitWriter* BitWriter,
-	tNat32      Bit
+	tNat1       Bit
 //=============================================================================
 ) {
 	BitWriter->WriteBit(BitWriter->Context, Bit);
@@ -883,14 +949,16 @@ void Close(
 namespace BitStream {
 	using tReader = struct {
 		ByteStream::tReader* Stream;
-		tNat32               Bits;
-		tNat32               Byte;
+		tNat8                Bits = 0;
+		tNat8                Byte = 0;
+		tNat8                _[6];
 	};
 	
 	using tWriter = struct {
 		ByteStream::tWriter* Stream;
-		tNat32               Bits;
-		tNat32               Byte;
+		tNat8                Bits = 0;
+		tNat8                Byte = 0;
+		tNat8                _[6];
 	};
 	
 	//=============================================================================
@@ -910,8 +978,8 @@ namespace BitStream {
 		tWriter* BitStream
 	//=============================================================================
 	) {
-		if (BitStream->Bits) {
-			ByteStream::Write(BitStream->Stream, (tNat8)BitStream->Byte);
+		if (BitStream->Bits != 0) {
+			ByteStream::Write(BitStream->Stream, BitStream->Byte);
 		}
 		*BitStream = {};
 	}
@@ -920,7 +988,7 @@ namespace BitStream {
 	static inline
 	void WriteBit(
 		tWriter* BitStream,
-		tNat32   Bit
+		tNat1    Bit
 	//=============================================================================
 	) {
 //		MEASURE_BLOCK(WriteBit);
@@ -932,13 +1000,14 @@ namespace BitStream {
 		if (Bits == 0) {
 			BitStream->Byte = Bit;
 		} else {
-			for (auto I = Bits; I --> 0;) { Bit <<= 1; }
-			BitStream->Byte |= Bit;
+			BitStream->Byte |= Bit << Bits;
 		}
 		
-		Bits = (Bits + 1) & 7;
+		Bits += 1;
+		Bits &= 7;
+		
 		if (Bits == 0) {
-			Write(BitStream->Stream, (tNat8)BitStream->Byte);
+			Write(BitStream->Stream, BitStream->Byte);
 		}
 		BitStream->Bits = Bits;
 	}
@@ -965,14 +1034,14 @@ namespace BitStream {
 	
 	//=============================================================================
 	static inline
-	tNat32 ReadBit(
+	tNat1 ReadBit(
 		tReader* BitStream
 	//=============================================================================
 	) {
 //		MEASURE_BLOCK(ReadBit);
 		
 		auto Bits = BitStream->Bits;
-		auto Byte = 0;
+		auto Byte = (tNat8)0;
 		if (Bits == 0) {
 			Byte = ByteStream::Read(BitStream->Stream);
 		} else {
@@ -995,7 +1064,7 @@ namespace BitStream {
 	) {
 		iBitWriter Interface = {};
 		Interface.Context  = BitStream;
-		Interface.WriteBit = (tFunc2<void*, tNat32, void>*)WriteBit;
+		Interface.WriteBit = (tFunc2<void*, tNat1, void>*)WriteBit;
 		Interface.Close    = (tFunc1<void*, void>*)(tFunc1<tWriter*, void>*)Close;
 		return Interface;
 	}
@@ -1008,7 +1077,7 @@ namespace BitStream {
 	) {
 		iBitReader Interface = {};
 		Interface.Context = BitStream;
-		Interface.ReadBit = (tFunc1<void*, tNat32>*)ReadBit;
+		Interface.ReadBit = (tFunc1<void*, tNat1>*)ReadBit;
 		Interface.Close   = (tFunc1<void*, void>*)(tFunc1<tReader*, void>*)Close;
 		return Interface;
 	}
@@ -1017,24 +1086,24 @@ namespace BitStream {
 namespace ArithmeticBitStream {
 	using tWriter = struct {
 		iBitWriter* BitStream;
-		tNat32 UnknowBits;
-		tNat32 Min;
-		tNat32 Range;
-		tNat32 Count0;
-		tNat32 Count;
-		tNat32 Count0_Old;
+		tNat32 UnknowBits = 0;
+		tNat32 Min        = 0;
+		tNat32 Range      = 0;
+		tNat32 Count0     = 0;
+		tNat32 Count      = 0;
+		tNat32 Count0_Old = 0;
 	};
 	
 	using tReader = struct {
 		iBitReader* BitStream;
-		tNat32 UnknowBits;
-		tNat32 Value;
-		tNat32 Min;
-		tNat32 Range;
-		tNat32 Count0;
-		tNat32 Count;
-		tNat32 Count0_Old;
-		tInt32 _; // 64 bit alignment
+		tNat32 UnknowBits = 0;
+		tNat32 Value      = 0;
+		tNat32 Min        = 0;
+		tNat32 Range      = 0;
+		tNat32 Count0     = 0;
+		tNat32 Count      = 0;
+		tNat32 Count0_Old = 0;
+		tNat8  _[4]       = {0, 0, 0, 0}; // 64 bit alignment
 	};
 	
 	//=============================================================================
@@ -1069,14 +1138,14 @@ namespace ArithmeticBitStream {
 	static inline
 	void WriteBit(
 		tWriter* Stream,
-		tNat32   Bit
+		tNat1    Bit
 	//=============================================================================
 	) {
 //		MEASURE_BLOCK(ArithmeticBitStream_WriteBit);
 		
 		//const tNat32 Full = 1 << 16;
-		const tNat32 Half = 1 << 15;
-		const tNat32 Quad = 1 << 14;
+		const auto cHalf = (tNat32)(1 << 15);
+		const auto cQuad = (tNat32)(1 << 14);
 		
 		auto Delta = (Stream->Count0_Old * Stream->Range) >> 8;
 		
@@ -1088,32 +1157,32 @@ namespace ArithmeticBitStream {
 		}
 		
 		for(;;) {
-			if ((Stream->Min + Stream->Range) - 1 < Half) {
+			if ((Stream->Min + Stream->Range) - 1 < cHalf) {
 				Stream->Range <<= 1;
 				Stream->Min    -= 0;
 				Stream->Min   <<= 1;
 				
 				WriteBit(Stream->BitStream, 0);
-				while (Stream->UnknowBits) {
+				while (Stream->UnknowBits != 0) {
 					Stream->UnknowBits -= 1;
 					WriteBit(Stream->BitStream, 1);
 				}
-			} else if (Stream->Min >= Half) {
+			} else if (Stream->Min >= cHalf) {
 				Stream->Range <<= 1;
-				Stream->Min    -= Half;
+				Stream->Min    -= cHalf;
 				Stream->Min   <<= 1;
 				
 				WriteBit(Stream->BitStream, 1);
-				while (Stream->UnknowBits) {
+				while (Stream->UnknowBits != 0) {
 					Stream->UnknowBits -= 1;
 					WriteBit(Stream->BitStream, 0);
 				}
 			} else if (
-				Stream->Min >= Quad &&
-				(Stream->Min + Stream->Range) - 1 < 3*Quad
+				Stream->Min >= cQuad &&
+				(Stream->Min + Stream->Range) - 1 < 3*cQuad
 			) {
 				Stream->Range <<= 1;
-				Stream->Min    -= Quad;
+				Stream->Min    -= cQuad;
 				Stream->Min   <<= 1;
 				
 				Stream->UnknowBits += 1;
@@ -1128,7 +1197,7 @@ namespace ArithmeticBitStream {
 		Stream->Count = (Stream->Count + 1) & 0xFF;
 		if (Stream->Count == 0) {
 			Stream->Count0   >>= 1;
-			Stream->Count0_Old = (tNat8)Stream->Count0;
+			Stream->Count0_Old = Stream->Count0;
 		}
 	}
 	
@@ -1141,31 +1210,31 @@ namespace ArithmeticBitStream {
 //		MEASURE_BLOCK(ArithmeticBitStream_ReadBit);
 		
 		//const tNat32 Full = 1 << 16;
-		const tNat32 Half = 1 << 15;
-		const tNat32 Quad = 1 << 14;
+		const auto cHalf = (tNat32)(1 << 15);
+		const auto cQuad = (tNat32)(1 << 14);
 		
 		auto Bit = (tNat32)0;
 		
-		if (Stream->UnknowBits) {
+		if (Stream->UnknowBits != 0) {
 			Bit = Stream->Value;
 			Stream->UnknowBits -= 1;
 		} else {
 			for (;;) {
-				if ((Stream->Min + Stream->Range) - 1 < Half) {
+				if ((Stream->Min + Stream->Range) - 1 < cHalf) {
 					Bit = 0;
 					Stream->Value = 1;
 					break;
-				} else if (Stream->Min >= Half) {
+				} else if (Stream->Min >= cHalf) {
 					Bit = 1;
 					Stream->Value = 0;
 					break;
 				} else if (
-					Stream->Min >= Quad &&
-					(Stream->Min + Stream->Range) - 1 < 3*Quad
+					Stream->Min >= cQuad &&
+					(Stream->Min + Stream->Range) - 1 < 3*cQuad
 				) {
 					Stream->UnknowBits += 1;
 					Stream->Range <<= 1;
-					Stream->Min    -= Quad;
+					Stream->Min    -= cQuad;
 					Stream->Min   <<= 1;
 				} else {
 					if (ReadBit(Stream->BitStream) == 0) {
@@ -1174,7 +1243,7 @@ namespace ArithmeticBitStream {
 						Stream->Min   <<= 1;
 					} else {
 						Stream->Range <<= 1;
-						Stream->Min    -= Half;
+						Stream->Min    -= cHalf;
 						Stream->Min   <<= 1;
 					}
 				}
@@ -1186,8 +1255,8 @@ namespace ArithmeticBitStream {
 		}
 		Stream->Count = (Stream->Count + 1) & 0xFF;
 		if (Stream->Count == 0) {
-			Stream->Count0_Old = (tNat8)Stream->Count0;
-			Stream->Count0   >>= 1;
+			Stream->Count0_Old = Stream->Count0;
+			Stream->Count0 >>= 1;
 		}
 		
 		auto Delta = (Stream->Count0_Old * Stream->Range) >> 8;
@@ -1230,7 +1299,7 @@ namespace ArithmeticBitStream {
 	) {
 		iBitReader Interface = {};
 		Interface.Context = (void*)Reader;
-		Interface.ReadBit = (tFunc1<void*, tNat32>*)(tFunc1<tReader*, tNat32>*)ReadBit;
+		Interface.ReadBit = (tFunc1<void*, tNat1>*)(tFunc1<tReader*, tNat1>*)ReadBit;
 		Interface.Close   = (tFunc1<void*, void>*)(tFunc1<tReader*, void>*)Close;
 		return Interface;
 	}
@@ -1243,7 +1312,7 @@ namespace ArithmeticBitStream {
 	) {
 		iBitWriter Interface = {};
 		Interface.Context  = (void*)Writer;
-		Interface.WriteBit = (tFunc2<void*, tNat32, void>*)(tFunc2<tWriter*, tNat32, void>*)WriteBit;
+		Interface.WriteBit = (tFunc2<void*, tNat1, void>*)(tFunc2<tWriter*, tNat1, void>*)WriteBit;
 		Interface.Close    = (tFunc1<void*, void>*)(tFunc1<tWriter*, void>*)Close;
 		return Interface;
 	}
@@ -1258,9 +1327,9 @@ void WriteNat_(
 ) {
 //	MEASURE_BLOCK(WriteNat_);
 	
-	for (auto I = (tNat32)16; I --> 0;) {
-		auto Bit = (Value >> I) & 1;
-		WriteBit(BitWriter, (tNat32)Bit);
+	for (auto I = (tNat8)16; I --> 0; ) {
+		auto Bit = (tNat1)((Value >> I) & 1);
+		WriteBit(BitWriter, Bit);
 	}
 }
 
@@ -1273,7 +1342,7 @@ tNat64 ReadNat_(
 //	MEASURE_BLOCK(ReadNat_);
 	
 	auto Result = (tNat64)0;
-	for (auto I = 16; I --> 0;) {
+	for (auto I = (tNat8)16; I --> 0; ) {
 		Result <<= 1;
 		Result |= ReadBit(BitReader);
 	}
@@ -1294,35 +1363,34 @@ namespace EliasGammaCode {
 		
 		Value += 1;
 		
-		auto DataBits = 1;
+		auto DataBits = (tNat8)1;
 		for (auto Temp = Value >> 1; Temp > 0; Temp >>= 1) {
 			WriteBit(BitWriter, 0);
 			DataBits += 1;
 		}
 		
-		while (DataBits > 0) {
-			DataBits -= 1;
+		while (DataBits --> 0) {
 			WriteBit(BitWriter, (Value >> DataBits) & 1);
 		}
 	}
 	
 	//=============================================================================
 	static inline
-	tNat64 Read(
+	tInt64 Read(
 		iBitReader* BitReader
 	//=============================================================================
 	) {
 //		MEASURE_BLOCK(Elias_Read);
 		
-		auto DataBits = 1;
+		auto DataBits = (tNat8)1;
 		auto Bit = ReadBit(BitReader);
 		while (Bit == 0) {
 			DataBits += 1;
 			Bit = ReadBit(BitReader);
 		}
 		
-		auto Value = 1;
-		while (DataBits -= 1) {
+		auto Value = (tInt64)1;
+		while (DataBits --> 0) {
 			Value <<= 1;
 			Value  |= ReadBit(BitReader);
 		}
@@ -1338,7 +1406,7 @@ namespace FibonacciCode {
 	static inline
 	void Init(
 		tNat64* FibArray,
-		tNat32  MaxFibBits
+		tNat8  MaxFibBits
 	//=============================================================================
 	) {
 		auto F1 = (tNat64)1;
@@ -1346,7 +1414,7 @@ namespace FibonacciCode {
 
 		ASSERT(MaxFibBits == 50)
 		
-		for (auto FibBits = (tNat32)0; FibBits <= MaxFibBits; FibBits += 1) {
+		for (auto FibBits = (tNat8)0; FibBits <= MaxFibBits; FibBits += 1) {
 			FibArray[FibBits] = F2;
 			
 			auto F = F1 + F2;
@@ -1371,12 +1439,12 @@ namespace FibonacciCode {
 		auto Fib = (tNat64)0;
 		while (FibBits --> 0) {
 			auto FibI = FibArray[FibBits];
-			auto Bit = Nat >= FibI;
-			if (Bit) {
+			auto Bit = (tNat1)((Nat >= FibI) ? 1 : 0);
+			if (Bit == 1) {
 				Nat -= FibI;
 			}
 			Fib <<= 1;
-			Fib |= (tNat64)Bit;
+			Fib |= Bit;
 		}
 		
 		return Fib;
@@ -1394,13 +1462,13 @@ namespace FibonacciCode {
 		
 		auto F1 = (tNat64)0;
 		auto F2 = (tNat64)1;
-		for (auto I = 0; Fib; I += 1, Fib >>= 1) {
+		for (auto I = (tNat8)0; Fib != 0; I += 1, Fib >>= 1) {
 			auto F = F1 + F2;
 			
 			F1 = F2;
 			F2 = F;
 			
-			if (Fib & 1) {
+			if ((Fib & 1) != 0) {
 				Nat += F;
 			}
 		}
@@ -1418,7 +1486,7 @@ namespace FibonacciCode {
 //		MEASURE_BLOCK(Fib_Write);
 		auto Fib = NatToFib(gFibArray, Value + 1);
 		
-		while (Fib) {
+		while (Fib != 0) {
 			WriteBit(BitWriter, Fib & 1);
 			Fib >>= 1;
 		}
@@ -1435,9 +1503,9 @@ namespace FibonacciCode {
 //		MEASURE_BLOCK(Fib_Read);
 		
 		auto Fib = (tNat64)ReadBit(BitReader);
-		for (auto Pos = 1;; Pos += 1) {
+		for (auto Pos = (tNat8)1; cTrue; Pos += 1) {
 			auto Bit = (tNat64)ReadBit(BitReader);
-			if (Bit & (Fib >> (Pos - 1))) { break; }
+			if ((Bit & (Fib >> (Pos - 1))) != 0) { break; }
 			Fib |= Bit << Pos;
 		}
 		
@@ -1479,15 +1547,15 @@ namespace Huffman {
 		auto ParentNodes = HeapAlloc<tNat32>(NodeCount);
 		auto Counts      = HeapAlloc<tNat32>(NodeCount);
 		
-		for (auto NodeId = NodeCount; NodeId --> 0;) {
-			NodeIds[NodeId] = (tNat32)NodeId;
+		for (auto NodeId = NodeCount; NodeId --> 0; ) {
+			NodeIds[NodeId] = NodeId;
 			ParentNodes[NodeId] = 0;
 			Counts[NodeId] = (NodeId < HistogrammSize) ? SortedHistogramm[NodeId] : 0;
 		}
 		
 		{ // build tree
 			auto I = (tNat32)0;
-			auto NewNodeId = (tNat32)HistogrammSize;
+			auto NewNodeId = HistogrammSize;
 			while (I <= NodeCount - 2) {
 				ASSERT(NewNodeId <= NodeCount)
 				auto NodeIdA = NodeIds[I + 0];
@@ -1510,12 +1578,12 @@ namespace Huffman {
 		
 		// get bit count
 		Counts[NodeCount - 1] = 0; // root
-		for (auto I = NodeCount - 1; I --> 0;) {
+		for (auto I = NodeCount - 1; I --> 0; ) {
 			auto NodeId       = NodeIds[I];
 			auto ParentNodeId = ParentNodes[NodeId];
 			Counts[NodeId]    = Counts[ParentNodeId] + 1;
 			if (NodeId < HistogrammSize) {
-				BitCounts[NodeId] = Counts[NodeId];
+				BitCounts[NodeId] = (tNat8)Counts[NodeId];
 			}
 		}
 		
@@ -1532,9 +1600,9 @@ namespace Huffman {
 		tArray<tNat32>& BitsArray  // OUT
 	//=============================================================================
 	) {
-		auto Bits = 0;
-		auto BitCount = 0;
-		for (auto NodeId = BitCounts.Size; NodeId --> 0;) {
+		auto Bits = (tNat32)0;
+		auto BitCount = (tNat8)0;
+		for (auto NodeId = BitCounts.Size; NodeId --> 0; ) {
 			auto NewBitCount = BitCounts[NodeId];
 			Bits <<= NewBitCount - BitCount;
 			BitCount = NewBitCount;
@@ -1549,6 +1617,16 @@ namespace Huffman {
 		tNat32 Count;
 		tNat32 NodeIndex;
 	};
+	
+	//=============================================================================
+	static inline
+	tInt8 CompareCounts(
+		tCount_NodeIndex A,
+		tCount_NodeIndex B
+	//=============================================================================
+	) {
+		return Sign((tInt64)A.Count - (tInt64)B.Count);
+	}
 	
 	//=============================================================================
 	static inline
@@ -1567,12 +1645,7 @@ namespace Huffman {
 				ForSortArray[Count].Count = Counts[Count];
 				ForSortArray[Count].NodeIndex = Count;
 			}
-			InPlaceQuickSort(
-				ForSortArray,
-				(tFunc2<tCount_NodeIndex, tCount_NodeIndex, tInt32> *) [](tCount_NodeIndex A, tCount_NodeIndex B) {
-					return Sign(A.Count > B.Count);
-				}
-			);
+			InPlaceQuickSort(ForSortArray, CompareCounts);
 			for (auto I = Count; I --> 0; ) {
 				SortedCounts[I] = ForSortArray[Count].Count;
 				SortedIndex[I] = ForSortArray[Count].NodeIndex;
@@ -1596,7 +1669,7 @@ namespace Huffman {
 		HeapFree(SortedIndex);
 	}
 	
-	using tWriter = struct {
+	struct tWriter final {
 		iBitWriter*    BitWriter;
 		tArray<tNat8>  BitCounts;
 		tArray<tNat32> Bits;
@@ -1621,18 +1694,18 @@ namespace Huffman {
 	static inline
 	void Write(
 		tWriter* Writer,
-		tInt32   Id
+		tNat32   Id
 	//=============================================================================
 	) {
 		auto BitCount = Writer->BitCounts[Id];
 		auto Bits = Writer->Bits[Id];
 		while (BitCount --> 0) {
-			WriteBit(Writer->BitWriter, Bits & 0x1);
+			WriteBit(Writer->BitWriter, Bits & 1);
 			Bits >>= 1;
 		}
 	}
 	
-	using tReader = struct {
+	struct tReader final {
 		iBitReader*    BitReader;
 		tArray<tNat8>  BitCounts;
 		tArray<tNat32> Bits;
@@ -1655,13 +1728,13 @@ namespace Huffman {
 	
 	//=============================================================================
 	static inline
-	tInt32 Read(
+	tNat32 Read(
 		tReader* Reader
 	//=============================================================================
 	) {
-		auto BitCount = 0;
-		auto Bits = (tNat32)0x0;
-		for (auto I = Reader->BitCounts.Size; I --> 0;) {
+		auto BitCount = (tNat8)0;
+		auto Bits = (tNat32)0;
+		for (auto I = Reader->BitCounts.Size; I --> 0; ) {
 			if (Reader->BitCounts[I] > BitCount) {
 				Bits <<= 1;
 				Bits |= ReadBit(Reader->BitReader);
@@ -1672,7 +1745,7 @@ namespace Huffman {
 				return I;
 			}
 		}
-		ASSERT(false);
+		ASSERT(cFalse);
 	}
 	
 	//=============================================================================
@@ -1685,16 +1758,16 @@ namespace Huffman {
 	) {
 		auto Count = BitCounts.Size;
 		FibonacciCode::Write(BitWriter, Count);
-		auto LastBitCount = 0;
+		auto LastBitCount = (tNat8)0;
 		for (auto I = (tNat32)0; I < Count; I += 1) {
 			auto BitCount = BitCounts[I];
-			auto Delta = BitCount - LastBitCount;
+			auto Delta = (tInt16)BitCount - (tInt16)LastBitCount;
 			auto IsNeg = (Delta >> 8) & 1;
 			FibonacciCode::Write(BitWriter, (Delta << 1) ^ (0 - IsNeg));
 			LastBitCount = BitCount;
 			
 			auto Bits_ = Bits[I];
-			for (auto J = 0; J < BitCount; J += 1) {
+			for (auto J = (tNat8)0; J < BitCount; J += 1) {
 				WriteBit(BitWriter, (Bits_ >> (BitCount - J - 1)) & 1);
 			}
 		}
@@ -1708,15 +1781,15 @@ namespace Huffman {
 		tArray<tNat32> Bits       // OUT
 	//=============================================================================
 	) {
-		auto BitCount = 0;
+		auto BitCount = (tNat8)0;
 		auto Count = Bits.Size;
 		for (auto I = (tNat32)0; I < Count; I += 1) {
 			auto Value = FibonacciCode::Read(BitReader);
 			auto IsNeg = Value & 1;
-			BitCount += (Value >> 1) ^ (0 - IsNeg);
+			BitCount += (tNat8)((Value >> 1) ^ (IsNeg ? 0xFF : 0));
 			BitCounts[I] = BitCount;
 			
-			auto Bits_ = 0x0;
+			auto Bits_ = (tNat32)0;
 			for (auto J = BitCount; J --> 0; ) {
 				Bits_ <<= 1;
 				Bits_ |= ReadBit(BitReader);
@@ -1749,13 +1822,13 @@ namespace Huffman {
 			{
 				tArray<tNat8> OutCounts = AsArray(BitCountsRes);
 				CalculateBitCount(InHistogramm, OutCounts);
-				for (auto I = _countof(Histogram); I --> 0;) {
+				for (auto I = _countof(Histogram); I --> 0; ) {
 					ASSERT(BitCountsRes[I] == BitCountsRef[I]);
 				}
 				
 				tArray<tNat32> OutBits = AsArray(BitsRes);
 				CalculateBits(OutCounts, OutBits);
-				for (auto I = _countof(Histogram); I --> 0;) {
+				for (auto I = _countof(Histogram); I --> 0; ) {
 					ASSERT(BitsRes[I] == BitsRef[I]);
 				}
 			}
@@ -1792,7 +1865,7 @@ namespace Huffman {
 				
 				Huffman::ReadHeader(&BitReader_, OutCounts, OutBits);
 				
-				for (auto I = _countof(BitCountsRef); I --> 0; ) {
+				for (auto I = (tNat32)_countof(BitCountsRef); I --> 0; ) {
 					ASSERT(BitCountsRef[I] == OutCounts[I]);
 					ASSERT(BitsRef[I] == OutBits[I]);
 				}
@@ -1819,8 +1892,8 @@ namespace Huffman {
 
 namespace HaarWavelet {
 	using tPair = struct {
-		tInt16 A;
-		tInt16 B;
+		tInt16 A = 0;
+		tInt16 B = 0;
 	};
 	
 	//=============================================================================
@@ -1847,11 +1920,11 @@ namespace HaarWavelet {
 		return Res;
 	}
 	
-	using tQuad = struct {
-		tInt16 A;
-		tInt16 B;
-		tInt16 C;
-		tInt16 D;
+	struct tQuad {
+		tInt16 A = 0;
+		tInt16 B = 0;
+		tInt16 C = 0;
+		tInt16 D = 0;
 	};
 	
 	//=============================================================================
@@ -2024,59 +2097,54 @@ namespace HaarWavelet {
 
 namespace Layer {
 	using tLevel = struct {
-		tNat32 SizeXLeft;
-		tNat32 SizeXRight;       //    Left  Right
-		tNat32 SizeYTop;         //   +-----+---+
-		tNat32 SizeYBottom;      //   |  S  | H | Top
-		tInt16* S; // Summe      //   |     |   |
-		tInt16* H; // Horizontal //   +-----+---+
-		tInt16* V; // Vertical   //   |  V  | D | Bottom
-		tInt16* D; // Diagonal   //   +-----+---+
-		tNat32 Pitch;            // Pitch >= SizeXLeft >= SizeXRight; SizeYTop >= SizeYBottom
-		tInt32 _; // 64 bit alignment
+		tNat16         SizeXLeft;
+		tNat16         SizeXRight;      //    Left  Right
+		tNat16         SizeYTop;        //   +-----+---+
+		tNat16         SizeYBottom;     //   |  S  | H | Top
+		tArray<tInt16> S; // Summe      //   |     |   |
+		tArray<tInt16> H; // Horizontal //   +-----+---+
+		tArray<tInt16> V; // Vertical   //   |  V  | D | Bottom
+		tArray<tInt16> D; // Diagonal   //   +-----+---+
+		tNat16         Pitch;           // Pitch >= SizeXLeft >= SizeXRight; SizeYTop >= SizeYBottom
+		tNat8          _[6];            // 64 bit alignment
 	};
 	
 	//=============================================================================
 	static
-	tNat32 Init(
-		tLevel* Layers,
-		tNat32  SizeX,
-		tNat32  SizeY,
-		tInt16* Buffer,
-		tInt32  BufferSize
+	tNat8 Init(
+		tLevel*        Layers,
+		tNat16         SizeX,
+		tNat16         SizeY,
+		tArray<tNat8>& Mem
 	//=============================================================================
 	) {
-		auto InitLevel = 0u;
+		auto InitLevel = (tNat8)0;
 		{ // Berechne InitLevel + Initalisierung vom InitLevel
 			auto X = SizeX;
 			auto Y = SizeY;
 			while (X > 1 || Y > 1) {
-				X = (tNat16)((X + 1) >> 1);
-				Y = (tNat16)((Y + 1) >> 1);
+				X = (X + 1) >> 1;
+				Y = (Y + 1) >> 1;
 				InitLevel += 1;
 			}
 			auto Layer = &Layers[InitLevel];
 			
-			Layer->Pitch = (tNat32)((SizeX + 7) & ~7);
+			Layer->Pitch = (SizeX + 7) & ~7;
 			Layer->SizeXLeft = SizeX;
 			Layer->SizeXRight = 0;
 			Layer->SizeYTop = SizeY;
 			Layer->SizeYBottom = 0;
 			
-			Layer->S = Buffer;
-			Buffer += Layer->Pitch * Layer->SizeYTop;
-			BufferSize -= Layer->Pitch * Layer->SizeYTop;
-			Layer->H = NULL;
-			Layer->V = NULL;
-			Layer->D = NULL;
+			Layer->S = MemAlloc<tInt16>(Mem, Layer->Pitch * Layer->SizeYTop);
+			Layer->H = MemAlloc<tInt16>(Mem, 0);
+			Layer->V = MemAlloc<tInt16>(Mem, 0);
+			Layer->D = MemAlloc<tInt16>(Mem, 0);
 		}
 		
-		ASSERT(BufferSize > 0)
-		
 		{ // Initalisierung restlicher Levels
-			auto X = (tNat32)SizeX;
-			auto Y = (tNat32)SizeY;
-			for (auto Level = (tInt32)InitLevel - 1; Level >= 0; Level -= 1) {
+			auto X = (tNat16)SizeX;
+			auto Y = (tNat16)SizeY;
+			for (auto Level = InitLevel; Level --> 0; ) {
 				auto Layer = &Layers[Level];
 				
 				Layer->SizeXRight  = (X + 0) >> 1;
@@ -2086,25 +2154,10 @@ namespace Layer {
 				
 				Layer->Pitch = (Layer->SizeXLeft + 7) & ~7;
 				
-				Layer->S    = Buffer;
-				Buffer     += Layer->Pitch * Layer->SizeYTop;
-				BufferSize -= Layer->Pitch * Layer->SizeYTop;
-				ASSERT(BufferSize > 0)
-				
-				Layer->H    = Buffer;
-				Buffer     += Layer->Pitch * Layer->SizeYTop;
-				BufferSize -= Layer->Pitch * Layer->SizeYTop;
-				ASSERT(BufferSize > 0)
-				
-				Layer->V    = Buffer;
-				Buffer     += Layer->Pitch * Layer->SizeYBottom;
-				BufferSize -= Layer->Pitch * Layer->SizeYBottom;
-				ASSERT(BufferSize > 0)
-				
-				Layer->D    = Buffer;
-				Buffer     += Layer->Pitch * Layer->SizeYBottom;
-				BufferSize -= Layer->Pitch * Layer->SizeYBottom;
-				ASSERT(BufferSize > 0)
+				Layer->S = MemAlloc<tInt16>(Mem, Layer->Pitch * Layer->SizeYTop);
+				Layer->H = MemAlloc<tInt16>(Mem, Layer->Pitch * Layer->SizeYTop);
+				Layer->V = MemAlloc<tInt16>(Mem, Layer->Pitch * Layer->SizeYBottom);
+				Layer->D = MemAlloc<tInt16>(Mem, Layer->Pitch * Layer->SizeYBottom);
 				
 				X = Layer->SizeXLeft;
 				Y = Layer->SizeYTop;
@@ -2115,12 +2168,12 @@ namespace Layer {
 	
 	//=============================================================================
 	static inline
-	tInt32 DeltaQubicWavelet(
-		tInt32 Last2,
-		tInt32 Last1,
-		tInt32 Curr,
-		tInt32 Next1,
-		tInt32 Next2
+	tInt16 DeltaQubicWavelet(
+		tInt16 Last2,
+		tInt16 Last1,
+		tInt16 Curr,
+		tInt16 Next1,
+		tInt16 Next2
 	//=============================================================================
 	) {
 		//auto c = 7; // beste Ganzzahl
@@ -2133,58 +2186,58 @@ namespace Layer {
 	
 	//=============================================================================
 	static inline
-	tInt32 DeltaQubicWaveletPre2(
-		tInt32 Curr,
-		tInt32 Next1,
-		tInt32 Next2
+	tInt16 DeltaQubicWaveletPre2(
+		tInt16 Curr,
+		tInt16 Next1,
+		tInt16 Next2
 	//=============================================================================
 	) {
-		auto Last2 = 2*Curr - Next2;
-		auto Last1 = 2*Curr - Next1;
+		auto Last2 = (tInt16)(2*Curr - Next2);
+		auto Last1 = (tInt16)(2*Curr - Next1);
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
 	//=============================================================================
 	static inline
-	tInt32 DeltaQubicWaveletPre1(
-		tInt32 Last1,
-		tInt32 Curr,
-		tInt32 Next1,
-		tInt32 Next2
+	tInt16 DeltaQubicWaveletPre1(
+		tInt16 Last1,
+		tInt16 Curr,
+		tInt16 Next1,
+		tInt16 Next2
 	//=============================================================================
 	) {
-		auto Last2 = 2*Last1 - Curr;
+		auto Last2 = (tInt16)(2*Last1 - Curr);
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
 	//=============================================================================
 	static inline
-	tInt32 DeltaQubicWaveletPost1(
-		tInt32 Last2,
-		tInt32 Last1,
-		tInt32 Curr,
-		tInt32 Next1
+	tInt16 DeltaQubicWaveletPost1(
+		tInt16 Last2,
+		tInt16 Last1,
+		tInt16 Curr,
+		tInt16 Next1
 	//=============================================================================
 	) {
-		auto Next2 = 2*Next1 - Curr;
+		auto Next2 = (tInt16)(2*Next1 - Curr);
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
 	//=============================================================================
 	static inline
-	tInt32 DeltaQubicWaveletPost2(
-		tInt32 Last2,
-		tInt32 Last1,
-		tInt32 Curr
+	tInt16 DeltaQubicWaveletPost2(
+		tInt16 Last2,
+		tInt16 Last1,
+		tInt16 Curr
 	//=============================================================================
 	) {
-		auto Next2 = 2*Curr - Last2;
-		auto Next1 = 2*Curr - Last1;
+		auto Next2 = (tInt16)(2*Curr - Last2);
+		auto Next1 = (tInt16)(2*Curr - Last1);
 		return DeltaQubicWavelet(Last2, Last1, Curr, Next1, Next2);
 	}
 	
-	const tInt32 PredDist = 2;
-	const tInt32 DFactor = 2;// shift 2
+	const auto cPredDist = (tNat8)2;
+	const auto cDFactor = (tNat8)2; // shift 2
 	
 	//=============================================================================
 	static
@@ -2210,20 +2263,20 @@ namespace Layer {
 		auto SizeY0 = (tInt32)(SizeY + 1) >> 1;
 		auto SizeY1 = (tInt32)(SizeY + 0) >> 1;
 		
-		auto Last2_S = 0;
-		auto Last2_V = 0;
-		auto Last1_S = 0;
-		auto Last1_V = 0;
-		auto Curr0_S = 0;
-		auto Curr0_V = 0;
-		auto Next1_S = 0;
-		auto Next1_V = 0;
-		auto Next2_S = 0;
-		auto Next2_V = 0;
+		auto Last2_S = (tInt16)0;
+		auto Last2_V = (tInt16)0;
+		auto Last1_S = (tInt16)0;
+		auto Last1_V = (tInt16)0;
+		auto Curr0_S = (tInt16)0;
+		auto Curr0_V = (tInt16)0;
+		auto Next1_S = (tInt16)0;
+		auto Next1_V = (tInt16)0;
+		auto Next2_S = (tInt16)0;
+		auto Next2_V = (tInt16)0;
 		
-		for (auto Y = -PredDist; Y < SizeY0; Y++) {
+		for (auto Y = -cPredDist; Y < SizeY0; Y++) {
 			auto Y2 = Y << 1;
-			for (auto X = -PredDist; X < SizeX0; X++) {
+			for (auto X = -cPredDist; X < SizeX0; X++) {
 				Last2_S = Last1_S;
 				Last2_V = Last1_V;
 				Last1_S = Curr0_S;
@@ -2232,55 +2285,55 @@ namespace Layer {
 				Curr0_V = Next1_V;
 				Next1_S = Next2_S;
 				Next1_V = Next2_V;
-				if (X + PredDist < SizeX0) {
-					if (Y + PredDist < SizeY0) {
+				if (X + cPredDist < SizeX0) {
+					if (Y + cPredDist < SizeY0) {
 						auto X2 = X << 1;
 						HaarWavelet::tQuad Arg;
 						HaarWavelet::tQuad Res;
-						if (Y2 + 2*PredDist == SizeY - 1) {
-							if (X2 + 2*PredDist  == SizeX - 1) {
-								Arg.A = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 0) * SrcPitch)];
+						if (Y2 + 2*cPredDist == SizeY - 1) {
+							if (X2 + 2*cPredDist  == SizeX - 1) {
+								Arg.A = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
 								Arg.B = Arg.A;
 								Arg.C = Arg.A;
 								Arg.D = Arg.A;
 								
 								Res = HaarWavelet::EnCode(Arg);
 								
-								DesS[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.A;
+								DesS[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.A;
 							} else {
-								Arg.A = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 0) * SrcPitch)];
-								Arg.B = Src[(tNat32)((X2 + 2*PredDist + 1) + (Y2 + 2*PredDist + 0) * SrcPitch)];
+								Arg.A = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
+								Arg.B = Src[(tNat32)((X2 + 2*cPredDist + 1) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
 								Arg.C = Arg.A;
 								Arg.D = Arg.B;
 								
 								Res = HaarWavelet::EnCode(Arg);
 								
-								DesS[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.A;
-								DesH[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.B;
+								DesS[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.A;
+								DesH[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.B;
 							}
 						} else {
-							if (X2 + 2*PredDist == SizeX - 1) {
-								Arg.A = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 0) * SrcPitch)];
+							if (X2 + 2*cPredDist == SizeX - 1) {
+								Arg.A = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
 								Arg.B = Arg.A;
-								Arg.C = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 1) * SrcPitch)];
+								Arg.C = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 1) * SrcPitch)];
 								Arg.D = Arg.C;
 								
 								Res = HaarWavelet::EnCode(Arg);
 								
-								DesS[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.A;
-								DesV[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.C;
+								DesS[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.A;
+								DesV[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.C;
 							} else {
-								Arg.A = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 0) * SrcPitch)];
-								Arg.B = Src[(tNat32)((X2 + 2*PredDist + 1) + (Y2 + 2*PredDist + 0) * SrcPitch)];
-								Arg.C = Src[(tNat32)((X2 + 2*PredDist + 0) + (Y2 + 2*PredDist + 1) * SrcPitch)];
-								Arg.D = Src[(tNat32)((X2 + 2*PredDist + 1) + (Y2 + 2*PredDist + 1) * SrcPitch)];
+								Arg.A = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
+								Arg.B = Src[(tNat32)((X2 + 2*cPredDist + 1) + (Y2 + 2*cPredDist + 0) * SrcPitch)];
+								Arg.C = Src[(tNat32)((X2 + 2*cPredDist + 0) + (Y2 + 2*cPredDist + 1) * SrcPitch)];
+								Arg.D = Src[(tNat32)((X2 + 2*cPredDist + 1) + (Y2 + 2*cPredDist + 1) * SrcPitch)];
 								
 								Res = HaarWavelet::EnCode(Arg);
 								
-								DesS[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.A;
-								DesH[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.B;
-								DesV[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.C;
-								DesD[(X + PredDist) + (Y + PredDist) * DesPitch] = Res.D;
+								DesS[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.A;
+								DesH[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.B;
+								DesV[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.C;
+								DesD[(X + cPredDist) + (Y + cPredDist) * DesPitch] = Res.D;
 							}
 						}
 					}
@@ -2289,46 +2342,46 @@ namespace Layer {
 						continue;
 					}
 					
-					Next2_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
-					Next2_V = DesV[(X + PredDist) + (Y + 0) * DesPitch];
+					Next2_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
+					Next2_V = DesV[(X + cPredDist) + (Y + 0) * DesPitch];
 					if (Y < SizeY1) {
 						auto Temp = 0;
 						if (Y == 0) {
-							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
-							auto Next1L_S = DesS[(X + PredDist) + (Y + 1) * DesPitch];
-							auto Next2L_S = DesS[(X + PredDist) + (Y + 2) * DesPitch];
+							auto Curr0L_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
+							auto Next1L_S = DesS[(X + cPredDist) + (Y + 1) * DesPitch];
+							auto Next2L_S = DesS[(X + cPredDist) + (Y + 2) * DesPitch];
 							Temp = DeltaQubicWaveletPre2(Curr0L_S, Next1L_S, Next2L_S);
 						} else
 						if (Y == 1) {
-							auto Last1L_S = DesS[(X + PredDist) + (Y - 1) * DesPitch];
-							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
-							auto Next1L_S = DesS[(X + PredDist) + (Y + 1) * DesPitch];
-							auto Next2L_S = DesS[(X + PredDist) + (Y + 2) * DesPitch];
+							auto Last1L_S = DesS[(X + cPredDist) + (Y - 1) * DesPitch];
+							auto Curr0L_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
+							auto Next1L_S = DesS[(X + cPredDist) + (Y + 1) * DesPitch];
+							auto Next2L_S = DesS[(X + cPredDist) + (Y + 2) * DesPitch];
 							Temp = DeltaQubicWaveletPre1(Last1L_S, Curr0L_S, Next1L_S, Next2L_S);
 						} else
-						if (Y + PredDist < SizeY0) {
-							auto Last2L_S = DesS[(X + PredDist) + (Y - 2) * DesPitch];
-							auto Last1L_S = DesS[(X + PredDist) + (Y - 1) * DesPitch];
-							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
-							auto Next1L_S = DesS[(X + PredDist) + (Y + 1) * DesPitch];
-							auto Next2L_S = DesS[(X + PredDist) + (Y + 2) * DesPitch];
+						if (Y + 2 < SizeY0) {
+							auto Last2L_S = DesS[(X + cPredDist) + (Y - 2) * DesPitch];
+							auto Last1L_S = DesS[(X + cPredDist) + (Y - 1) * DesPitch];
+							auto Curr0L_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
+							auto Next1L_S = DesS[(X + cPredDist) + (Y + 1) * DesPitch];
+							auto Next2L_S = DesS[(X + cPredDist) + (Y + 2) * DesPitch];
 							Temp = DeltaQubicWavelet(Last2L_S, Last1L_S, Curr0L_S, Next1L_S, Next2L_S);
 						} else
 						if (Y + 2 == SizeY0) {
-							auto Last2L_S = DesS[(X + PredDist) + (Y - 2) * DesPitch];
-							auto Last1L_S = DesS[(X + PredDist) + (Y - 1) * DesPitch];
-							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
-							auto Next1L_S = DesS[(X + PredDist) + (Y + 1) * DesPitch];
+							auto Last2L_S = DesS[(X + cPredDist) + (Y - 2) * DesPitch];
+							auto Last1L_S = DesS[(X + cPredDist) + (Y - 1) * DesPitch];
+							auto Curr0L_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
+							auto Next1L_S = DesS[(X + cPredDist) + (Y + 1) * DesPitch];
 							Temp = DeltaQubicWaveletPost1(Last2L_S, Last1L_S, Curr0L_S, Next1L_S);
 						} else
 						if (Y + 1 == SizeY0) {
-							auto Last2L_S = DesS[(X + PredDist) + (Y - 2) * DesPitch];
-							auto Last1L_S = DesS[(X + PredDist) + (Y - 1) * DesPitch];
-							auto Curr0L_S = DesS[(X + PredDist) + (Y + 0) * DesPitch];
+							auto Last2L_S = DesS[(X + cPredDist) + (Y - 2) * DesPitch];
+							auto Last1L_S = DesS[(X + cPredDist) + (Y - 1) * DesPitch];
+							auto Curr0L_S = DesS[(X + cPredDist) + (Y + 0) * DesPitch];
 							Temp = DeltaQubicWaveletPost2(Last2L_S, Last1L_S, Curr0L_S);
 						}
-						auto V = DesV[(X + PredDist) + Y * DesPitch] - Temp;
-						DesV[(X + PredDist) + Y * DesPitch] = (tInt16)V;
+						auto V = DesV[(X + cPredDist) + Y * DesPitch] - Temp;
+						DesV[(X + cPredDist) + Y * DesPitch] = (tInt16)V;
 					}
 				}
 				
@@ -2336,8 +2389,8 @@ namespace Layer {
 					continue;
 				}
 				
-				auto TempH = 0;
-				auto TempD = 0;
+				auto TempH = (tInt16)0;
+				auto TempD = (tInt16)0;
 				if (X == 0) {
 					TempH = DeltaQubicWaveletPre2(Curr0_S, Next1_S, Next2_S);
 					TempD = DeltaQubicWaveletPre2(Curr0_V, Next1_V, Next2_V);
@@ -2346,7 +2399,7 @@ namespace Layer {
 					TempH = DeltaQubicWaveletPre1(Last1_S, Curr0_S, Next1_S, Next2_S);
 					TempD = DeltaQubicWaveletPre1(Last1_V, Curr0_V, Next1_V, Next2_V);
 				} else
-				if (X + PredDist < SizeX1) {
+				if (X + 2 < SizeX1) {
 					TempH = DeltaQubicWavelet(Last2_S, Last1_S, Curr0_S, Next1_S, Next2_S);
 					TempD = DeltaQubicWavelet(Last2_V, Last1_V, Curr0_V, Next1_V, Next2_V);
 				} else
@@ -2363,13 +2416,13 @@ namespace Layer {
 					DesH[X + Y * DesPitch] = (tInt16)H;
 				}
 				if (Y < SizeY1) {
-					auto D = DesD[X + Y * DesPitch] - ((TempD + DFactor) >> DFactor);
+					auto D = DesD[X + Y * DesPitch] - ((TempD + cDFactor) >> cDFactor);
 					DesD[X + Y * DesPitch] = (tInt16)D;
 				}
 			}
 		}
 	}
-	
+
 	//=============================================================================
 	static
 	void ComposeWithQubPred(
@@ -2394,20 +2447,20 @@ namespace Layer {
 		auto SizeY0 = (tInt32)(SizeY + 1) >> 1;
 		auto SizeY1 = (tInt32)(SizeY + 0) >> 1;
 		
-		auto Last2_S = 0;
-		auto Last2_V = 0;
-		auto Last1_S = 0;
-		auto Last1_V = 0;
-		auto Curr0_S = 0;
-		auto Curr0_V = 0;
-		auto Next1_S = 0;
-		auto Next1_V = 0;
-		auto Next2_S = 0;
-		auto Next2_V = 0;
+		auto Last2_S = (tInt16)0;
+		auto Last2_V = (tInt16)0;
+		auto Last1_S = (tInt16)0;
+		auto Last1_V = (tInt16)0;
+		auto Curr0_S = (tInt16)0;
+		auto Curr0_V = (tInt16)0;
+		auto Next1_S = (tInt16)0;
+		auto Next1_V = (tInt16)0;
+		auto Next2_S = (tInt16)0;
+		auto Next2_V = (tInt16)0;
 		
 		for (auto Y = 0; Y < SizeY0; Y++) {
 			auto Y2 = Y << 1;
-			for (auto X = -PredDist; X < SizeX0; X++) {
+			for (auto X = -cPredDist; X < SizeX0; X++) {
 				Last2_S = Last1_S;
 				Last2_V = Last1_V;
 				Last1_S = Curr0_S;
@@ -2416,53 +2469,53 @@ namespace Layer {
 				Curr0_V = Next1_V;
 				Next1_S = Next2_S;
 				Next1_V = Next2_V;
-				if (X + PredDist < SizeX0 && (SizeX & SizeY) >= 8) {
-					Next2_S = SrcS[(tNat16)(X + PredDist) + Y * SrcPitch];
+				if (X + cPredDist < SizeX0 && (SizeX & SizeY) >= 8) {
+					Next2_S = SrcS[(X + cPredDist) + Y * SrcPitch];
 					
 					if (Y < SizeY1) {
-						auto Temp = 0;
+						auto Temp = (tInt16)0;
 						if (Y == 0) {
-							auto Curr0L_S = SrcS[(X + PredDist) + (Y + 0) * SrcPitch];
-							auto Next1L_S = SrcS[(X + PredDist) + (Y + 1) * SrcPitch];
-							auto Next2L_S = SrcS[(X + PredDist) + (Y + 2) * SrcPitch];
+							auto Curr0L_S = SrcS[(X + cPredDist) + (Y + 0) * SrcPitch];
+							auto Next1L_S = SrcS[(X + cPredDist) + (Y + 1) * SrcPitch];
+							auto Next2L_S = SrcS[(X + cPredDist) + (Y + 2) * SrcPitch];
 							Temp = DeltaQubicWaveletPre2(Curr0L_S, Next1L_S, Next2L_S);
 						} else
 						if (Y == 1) {
-							auto Last1L_S = SrcS[(X + PredDist) + (Y - 1) * SrcPitch];
-							auto Curr0L_S = SrcS[(X + PredDist) + (Y + 0) * SrcPitch];
-							auto Next1L_S = SrcS[(X + PredDist) + (Y + 1) * SrcPitch];
-							auto Next2L_S = SrcS[(X + PredDist) + (Y + 2) * SrcPitch];
+							auto Last1L_S = SrcS[(X + cPredDist) + (Y - 1) * SrcPitch];
+							auto Curr0L_S = SrcS[(X + cPredDist) + (Y + 0) * SrcPitch];
+							auto Next1L_S = SrcS[(X + cPredDist) + (Y + 1) * SrcPitch];
+							auto Next2L_S = SrcS[(X + cPredDist) + (Y + 2) * SrcPitch];
 							Temp = DeltaQubicWaveletPre1(Last1L_S, Curr0L_S, Next1L_S, Next2L_S);
 						} else
 						if (Y + 2 < SizeY0) {
-							auto Last2L_S = SrcS[(X + PredDist) + (Y - 2) * SrcPitch];
-							auto Last1L_S = SrcS[(X + PredDist) + (Y - 1) * SrcPitch];
-							auto Curr0L_S = SrcS[(X + PredDist) + (Y + 0) * SrcPitch];
-							auto Next1L_S = SrcS[(X + PredDist) + (Y + 1) * SrcPitch];
-							auto Next2L_S = SrcS[(X + PredDist) + (Y + 2) * SrcPitch];
+							auto Last2L_S = SrcS[(X + cPredDist) + (Y - 2) * SrcPitch];
+							auto Last1L_S = SrcS[(X + cPredDist) + (Y - 1) * SrcPitch];
+							auto Curr0L_S = SrcS[(X + cPredDist) + (Y + 0) * SrcPitch];
+							auto Next1L_S = SrcS[(X + cPredDist) + (Y + 1) * SrcPitch];
+							auto Next2L_S = SrcS[(X + cPredDist) + (Y + 2) * SrcPitch];
 							Temp = DeltaQubicWavelet(Last2L_S, Last1L_S, Curr0L_S, Next1L_S, Next2L_S);
 						} else
 						if (Y + 2 == SizeY0) {
-							auto Last2L_S = SrcS[(X + PredDist) + (Y - 2) * SrcPitch];
-							auto Last1L_S = SrcS[(X + PredDist) + (Y - 1) * SrcPitch];
-							auto Curr0L_S = SrcS[(X + PredDist) + (Y + 0) * SrcPitch];
-							auto Next1L_S = SrcS[(X + PredDist) + (Y + 1) * SrcPitch];
+							auto Last2L_S = SrcS[(X + cPredDist) + (Y - 2) * SrcPitch];
+							auto Last1L_S = SrcS[(X + cPredDist) + (Y - 1) * SrcPitch];
+							auto Curr0L_S = SrcS[(X + cPredDist) + (Y + 0) * SrcPitch];
+							auto Next1L_S = SrcS[(X + cPredDist) + (Y + 1) * SrcPitch];
 							Temp = DeltaQubicWaveletPost1(Last2L_S, Last1L_S, Curr0L_S, Next1L_S);
 						} else
 						if (Y + 1 == SizeY0) {
-							auto Last2L_S = SrcS[(X + PredDist) + (Y - 2) * SrcPitch];
-							auto Last1L_S = SrcS[(X + PredDist) + (Y - 1) * SrcPitch];
-							auto Curr0L_S = SrcS[(X + PredDist) + (Y + 0) * SrcPitch];
+							auto Last2L_S = SrcS[(X + cPredDist) + (Y - 2) * SrcPitch];
+							auto Last1L_S = SrcS[(X + cPredDist) + (Y - 1) * SrcPitch];
+							auto Curr0L_S = SrcS[(X + cPredDist) + (Y + 0) * SrcPitch];
 							Temp = DeltaQubicWaveletPost2(Last2L_S, Last1L_S, Curr0L_S);
 						}
-						SrcV[(X + PredDist) + Y * SrcPitch] += (tInt16)Temp;
+						SrcV[(X + cPredDist) + Y * SrcPitch] += (tInt16)Temp;
 					}
-					Next2_V = SrcV[(X + PredDist) + (Y + 0) * SrcPitch];
+					Next2_V = SrcV[(X + cPredDist) + (Y + 0) * SrcPitch];
 				}
 				
 				if (X >= 0 && (SizeX & SizeY) >= 8) {
-					auto TempH = 0;
-					auto TempD = 0;
+					auto TempH = (tInt16)0;
+					auto TempD = (tInt16)0;
 					if (X == 0) {
 						TempH = DeltaQubicWaveletPre2(Curr0_S, Next1_S, Next2_S);
 						TempD = DeltaQubicWaveletPre2(Curr0_V, Next1_V, Next2_V);
@@ -2471,7 +2524,7 @@ namespace Layer {
 						TempH = DeltaQubicWaveletPre1(Last1_S, Curr0_S, Next1_S, Next2_S);
 						TempD = DeltaQubicWaveletPre1(Last1_V, Curr0_V, Next1_V, Next2_V);
 					} else
-					if (X + PredDist < SizeX1) {
+					if (X + 2< SizeX1) {
 						TempH = DeltaQubicWavelet(Last2_S, Last1_S, Curr0_S, Next1_S, Next2_S);
 						TempD = DeltaQubicWavelet(Last2_V, Last1_V, Curr0_V, Next1_V, Next2_V);
 					} else
@@ -2485,12 +2538,12 @@ namespace Layer {
 					}
 					SrcH[X + Y * SrcPitch] += (tInt16)TempH;
 					if (Y < SizeY1) {
-						SrcD[X + Y * SrcPitch] += (tInt16)(TempD + DFactor) >> DFactor;
+						SrcD[X + Y * SrcPitch] += (tInt16)(TempD + cDFactor) >> cDFactor;
 					}
 				}
 				
 				if (X >= 0) {
-					auto X2 = X << 1;
+					auto X2 = (tNat16)(X << 1);
 					
 					HaarWavelet::tQuad Arg;
 					Arg.A = 0;
@@ -2504,7 +2557,8 @@ namespace Layer {
 						if (X2 + 1 == SizeX) {
 							Arg.A = SrcS[PosSrc];
 							auto Res = HaarWavelet::DeCode(Arg);
-							ASSERT(Res.A >= 0 &&
+							ASSERT(
+								Res.A >= 0 &&
 								Res.B >= 0 &&
 								Res.C >= 0 &&
 								Res.D >= 0
@@ -2564,56 +2618,54 @@ namespace Layer {
 		//=============================================================================
 		static inline
 		void TestSplitAndCompose(
+			tArray<tNat8> Mem
 		//=============================================================================
 		) {
-			const tInt32 SizeMax = 128;
-			const tInt32 DeltaPitch = 16;
+			const auto cSizeMax = (tNat16)128;
+			const auto cDeltaPitch = (tNat16)16;
 			
-			tInt16 Big[(SizeMax + DeltaPitch) * SizeMax] = {};
-			tInt16 S[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
-			tInt16 H[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
-			tInt16 V[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
-			tInt16 D[(SizeMax/2 + DeltaPitch) * SizeMax/2] = {};
+			auto Big = MemAlloc<tInt16>(Mem, (cSizeMax + cDeltaPitch) * cSizeMax);
+			auto S = MemAlloc<tInt16>(Mem, (cSizeMax/2 + cDeltaPitch) * cSizeMax/2);
+			auto H = MemAlloc<tInt16>(Mem, (cSizeMax/2 + cDeltaPitch) * cSizeMax/2);
+			auto V = MemAlloc<tInt16>(Mem, (cSizeMax/2 + cDeltaPitch) * cSizeMax/2);
+			auto D = MemAlloc<tInt16>(Mem, (cSizeMax/2 + cDeltaPitch) * cSizeMax/2);
 			
 			tLevel SmallLevel;
-			SmallLevel.SizeXLeft   = SizeMax/2;
-			SmallLevel.SizeXRight  = SizeMax/2;
-			SmallLevel.SizeYTop    = SizeMax/2;
-			SmallLevel.SizeYBottom = SizeMax/2;
+			SmallLevel.SizeXLeft   = cSizeMax/2;
+			SmallLevel.SizeXRight  = cSizeMax/2;
+			SmallLevel.SizeYTop    = cSizeMax/2;
+			SmallLevel.SizeYBottom = cSizeMax/2;
 			SmallLevel.S = S;
 			SmallLevel.H = H;
 			SmallLevel.V = V;
 			SmallLevel.D = D;
-			SmallLevel.Pitch = SizeMax/2 + DeltaPitch;
+			SmallLevel.Pitch = cSizeMax/2 + cDeltaPitch;
 			
 			tLevel BigLevel;
-			BigLevel.SizeXLeft   = SizeMax;
-			BigLevel.SizeXRight  = SizeMax;
-			BigLevel.SizeYTop    = SizeMax;
-			BigLevel.SizeYBottom = SizeMax;
+			BigLevel.SizeXLeft   = cSizeMax;
+			BigLevel.SizeXRight  = cSizeMax;
+			BigLevel.SizeYTop    = cSizeMax;
+			BigLevel.SizeYBottom = cSizeMax;
 			BigLevel.S = Big;
-			BigLevel.H = NULL;
-			BigLevel.V = NULL;
-			BigLevel.D = NULL;
-			BigLevel.Pitch = SizeMax + DeltaPitch;
+			BigLevel.Pitch = cSizeMax + cDeltaPitch;
 			
-			auto CalcPixel = [](tNat32 X, tNat32 Y, tNat32 I) { return (((X+257) * (Y+263) * I) % 251); };
+			auto CalcPixel = [](tNat32 X, tNat32 Y, tNat32 I) { return (tInt16)(((X+257) * (Y+263) * I) % 251); };
 			
-			for (auto I = 1; I < 500; I += 1) {
-				for (auto Y = 0; Y < SizeMax; Y += 1) {
-					for (auto X = 0; X < SizeMax; X += 1) {
-						Big[X + Y*SizeMax] = (tNat16)CalcPixel(X, Y, I);
+			for (auto I = (tNat32)500; I -->0; ) {
+				for (auto Y = (tNat32)0; Y < cSizeMax; Y += 1) {
+					for (auto X = (tNat32)0; X < cSizeMax; X += 1) {
+						Big[X + Y*cSizeMax] = CalcPixel(X, Y, I);
 					}
 				}
 				
-				for (auto Size = 2; Size <= SizeMax; Size <<= 1) {
+				for (auto Size = (tNat32)2; Size <= cSizeMax; Size <<= 1) {
 					SplitWithQubPred  (&BigLevel, &SmallLevel);
 					ComposeWithQubPred(&SmallLevel, &BigLevel);
 					
-					for (auto Y = 0; Y < SizeMax; Y += 1) {
-						for (auto X = 0; X < SizeMax; X += 1) {
-							auto A = Big[X + Y*SizeMax];
-							auto B = (tNat16)CalcPixel(X, Y, I);
+					for (auto Y = (tNat16)0; Y < cSizeMax; Y += 1) {
+						for (auto X = (tNat16)0; X < cSizeMax; X += 1) {
+							auto A = Big[X + Y*cSizeMax];
+							auto B = (tInt16)CalcPixel(X, Y, I);
 							ASSERT(A == B);
 						}
 					}
@@ -2624,9 +2676,10 @@ namespace Layer {
 		//=============================================================================
 		static inline
 		void Test(
+			tArray<tNat8> Mem
 		//=============================================================================
 		) {
-			TestSplitAndCompose();
+			TestSplitAndCompose(Mem);
 		}
 
 #	endif
@@ -2642,7 +2695,7 @@ namespace BmpHelper {
 	
 	using tInfoHeader = struct {
 		tNat32 HeaderSize;     // 40
-		tInt32 SizeX;
+		tNat32 SizeX;
 		tInt32 SizeY;          // negativ -> top-down; positiv -> bottom-up
 		tNat16 _;              // reserved
 		tNat16 BitCount;       // Pallette: 1, 4, 8; RGB: 16, 24, 32
@@ -2675,12 +2728,12 @@ namespace BmpHelper {
 	
 	//=============================================================================
 	static inline
-	tNat32 GetShift(
+	tNat8 GetShift(
 		tNat32 Mask
 	//=============================================================================
 	) {
-		for (auto Shift = 0u; Shift < 32; Shift += 1) {
-			if (Mask & 1) {
+		for (auto Shift = (tNat8)0; Shift < 32; Shift += 1) {
+			if ((Mask & 1) != 0) {
 				return Shift;
 			}
 			Mask >>= 1;
@@ -2701,13 +2754,13 @@ namespace BmpHelper {
 	) {
 //		MEASURE_BLOCK(GetLayerFromBmp16)
 		
-		auto MaskR = 0x00007C00u;
-		auto MaskG = 0x000003E0u;
-		auto MaskB = 0x0000001Fu;
+		auto MaskR = (tNat32)0x7C00;
+		auto MaskG = (tNat32)0x03E0;
+		auto MaskB = (tNat32)0x001F;
 		if (BmpInfoHeader.Compression == 3) {
 			GetColorMask(StreamIn, &MaskR, &MaskG, &MaskB);
 		}
-		auto MaskA = ~(MaskR | MaskG | MaskB) & 0x0000FFFFu;
+		auto MaskA = ~(MaskR | MaskG | MaskB) & 0x0000FFFF;
 		
 		auto ShiftA = GetShift(MaskA);
 		auto ShiftR = GetShift(MaskR);
@@ -2717,20 +2770,20 @@ namespace BmpHelper {
 		auto SizeX = BmpInfoHeader.SizeX;
 		auto RowSize = (tSize)(2*SizeX + 3) & (~3);
 		auto Row = (tNat16*)malloc(RowSize);
-		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
-			for (auto X = 0; X < SizeX; X += 1) {
+		for (auto Y = (tNat16)0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
+			for (auto X = (tNat16)0; X < SizeX; X += 1) {
 				auto J = Y*SizeX + X;
-				LayerA->S[J] = (tInt16)(Row[X] & MaskA) >> ShiftA;
+				LayerA->S[J] = (Row[X] & MaskA) >> ShiftA;
 				
-				auto R = (tInt16)(Row[X] & MaskR) >> ShiftR;
-				auto G = (tInt16)(Row[X] & MaskG) >> ShiftG;
-				auto B = (tInt16)(Row[X] & MaskB) >> ShiftB;
+				auto R = (tInt16)((Row[X] & MaskR) >> ShiftR);
+				auto G = (tInt16)((Row[X] & MaskG) >> ShiftG);
+				auto B = (tInt16)((Row[X] & MaskB) >> ShiftB);
 				
-				auto RB = R + B;
+				auto RB = (tInt16)(R + B);
 				
-				LayerY->S[J]  = (tInt16)((G<<1) + RB + 2) >> 2;
-				LayerCg->S[J] = (tInt16)((G<<1) - RB + 1) >> 1;
-				LayerCo->S[J] = (tInt16)(B - R);
+				LayerY->S[J]  = ((G<<1) + RB + 2) >> 2;
+				LayerCg->S[J] = ((G<<1) - RB + 1) >> 1;
+				LayerCo->S[J] = B - R;
 			}
 		}
 		free(Row);
@@ -2749,25 +2802,28 @@ namespace BmpHelper {
 	) {
 		MEASURE_BLOCK(GetLayerFromBmp24);
 		
-		auto SizeX = BmpInfoHeader.SizeX;
-		auto Pitch = LayerA->Pitch;
-		auto RowSize = (tSize)((3*SizeX + 3) & (~3));
+		auto SizeX = (tNat16)BmpInfoHeader.SizeX;
+		auto Pitch = (tNat16)LayerA->Pitch;
+		auto RowSize = (tSize)((3*SizeX+ 3) & (~3));
 		auto Row = (tNat8*)malloc(RowSize);
-		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
-			auto I = 0;
-			for (auto X = 0; X < SizeX; X += 1) {
+		for (auto Y = (tNat32)0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
+			auto I = (tNat32)0;
+			for (auto X = (tNat32)0; X < SizeX; X += 1) {
 				auto J = Y*Pitch + X;
 				LayerA->S[J] = 255;
 				
-				auto B = Row[I++];
-				auto G = Row[I++];
-				auto R = Row[I++];
+				auto B = (tInt16)Row[I];
+				I += 1;
+				auto G = (tInt16)Row[I];
+				I += 1;
+				auto R = (tInt16)Row[I];
+				I += 1;
 				
-				auto RB = R + B;
+				auto RB = (tInt16)(R + B);
 				
-				LayerY->S[J]  = (tInt16)((G<<1) + RB + 2) >> 2;
-				LayerCg->S[J] = (tInt16)((G<<1) - RB + 1) >> 1;
-				LayerCo->S[J] = (tInt16)(B - R);
+				LayerY->S[J]  = ((G<<1) + RB + 2) >> 2;
+				LayerCg->S[J] = ((G<<1) - RB + 1) >> 1;
+				LayerCo->S[J] = B - R;
 			}
 		}
 		free(Row);
@@ -2786,9 +2842,9 @@ namespace BmpHelper {
 	) {
 		MEASURE_BLOCK(GetLayerFromBmp32);
 		
-		auto MaskR = 0x00FF0000u;
-		auto MaskG = 0x0000FF00u;
-		auto MaskB = 0x000000FFu;
+		auto MaskR = (tNat32)0x00FF0000;
+		auto MaskG = (tNat32)0x0000FF00;
+		auto MaskB = (tNat32)0x000000FF;
 		if (BmpInfoHeader.Compression == 3) {
 			GetColorMask(StreamIn, &MaskR, &MaskG, &MaskB);
 		}
@@ -2800,22 +2856,22 @@ namespace BmpHelper {
 		auto ShiftB = GetShift(MaskB);
 		
 		auto SizeX = BmpInfoHeader.SizeX;
-		auto RowSize = (tSize)(4*SizeX);
+		auto RowSize = 4 * SizeX;
 		auto Row = (tNat32*)malloc(RowSize);
-		for (auto Y = 0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
-			for (auto X = 0; X < SizeX; X += 1) {
-				auto J = Y*SizeX + X;
+		for (auto Y = (tNat32)0; fread(Row, RowSize, 1, StreamIn); Y += 1) {
+			for (auto X = (tNat32)0; X < SizeX; X += 1) {
+				auto J = (tNat32)(Y*SizeX + X);
 				LayerA->S[J] = (tInt16)(Row[X] & MaskA) >> ShiftA;
 				
-				auto R = (tInt16)(Row[X] & MaskR) >> ShiftR;
-				auto G = (tInt16)(Row[X] & MaskG) >> ShiftG;
-				auto B = (tInt16)(Row[X] & MaskB) >> ShiftB;
+				auto R = (tInt16)((Row[X] & MaskR) >> ShiftR);
+				auto G = (tInt16)((Row[X] & MaskG) >> ShiftG);
+				auto B = (tInt16)((Row[X] & MaskB) >> ShiftB);
 				
-				auto RB = R + B;
+				auto RB = (tInt16)(R + B);
 				
-				LayerY->S[J]  = (tInt16)((G<<1) + RB + 2) >> 2;
-				LayerCg->S[J] = (tInt16)((G<<1) - RB + 1) >> 1;
-				LayerCo->S[J] = (tInt16)(B - R);
+				LayerY->S[J]  = ((G<<1) + RB + 2) >> 2;
+				LayerCg->S[J] = ((G<<1) - RB + 1) >> 1;
+				LayerCo->S[J] = B - R;
 			}
 		}
 		free(Row);
@@ -2834,10 +2890,14 @@ namespace BmpHelper {
 	) {
 		MEASURE_BLOCK(PutLayerToBmp32);
 		
-		tNat32 Mask[3];
-		auto MaskR = Mask[0] = 0x00FF0000u; // R
-		auto MaskG = Mask[1] = 0x0000FF00u; // G
-		auto MaskB = Mask[2] = 0x000000FFu; // B
+		tNat32 Mask[3] = {
+			0x00FF0000u, // R
+			0x0000FF00u, // G
+			0x000000FFu  // B
+		};
+		auto MaskR = Mask[0];
+		auto MaskG = Mask[1];
+		auto MaskB = Mask[2];
 		auto MaskA = ~(MaskR | MaskG | MaskB);
 		if (!fwrite(&Mask, sizeof(Mask), 1, StreamOut)) {
 			fprintf(gLogStream, "ERROR: fail writing to output!!!");
@@ -2853,26 +2913,27 @@ namespace BmpHelper {
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)(4*SizeX);
 		auto Row = (tNat32*)malloc(RowSize);
-		for (auto Y = 0; Y < BmpInfoHeader.SizeY; Y += 1) {
-			for (auto X = 0; X < SizeX; X += 1) {
-				auto J = Y*Pitch + X;
+		ASSERT(BmpInfoHeader.SizeY > 0); // TODO: allow negative SizeY
+		for (auto Y = (tNat32)0; Y < (tNat32)BmpInfoHeader.SizeY; Y += 1) {
+			for (auto X = (tNat32)0; X < SizeX; X += 1) {
+				auto J = (tNat32)(Y*Pitch + X);
 				
-				auto A  = LayerA->S[J];
-				auto Y_  = LayerY->S[J];
-				auto Cg = LayerCg->S[J];
-				auto Co = LayerCo->S[J];
+				auto A  = (tInt16)LayerA->S[J];
+				auto Y_ = (tInt16)LayerY->S[J];
+				auto Cg = (tInt16)LayerCg->S[J];
+				auto Co = (tInt16)LayerCo->S[J];
 				
-				auto RB = (Y_<<1) - Cg;
+				auto RB = (tInt16)((Y_<<1) - Cg);
 				
-				auto G = ((Y_<<1) + Cg) >> 1;
-				auto B = (RB + Co + 1) >> 1;
-				auto R = (RB - Co + 1) >> 1;
+				auto G = (tInt16)(((Y_<<1) + Cg) >> 1);
+				auto R = (tInt16)((RB - Co + 1) >> 1);
+				auto B = (tInt16)((RB + Co + 1) >> 1);
 				
 				auto Value = (
-					Min<tNat32>(Max<tInt32>(0, R), 255) << ShiftR |
-					Min<tNat32>(Max<tInt32>(0, G), 255) << ShiftG |
-					Min<tNat32>(Max<tInt32>(0, B), 255) << ShiftB |
-					Min<tNat32>(Max<tInt32>(0, A), 255) << ShiftA
+					Min<tInt16>(Max<tInt16>(0, R), 255) << ShiftR |
+					Min<tInt16>(Max<tInt16>(0, G), 255) << ShiftG |
+					Min<tInt16>(Max<tInt16>(0, B), 255) << ShiftB |
+					Min<tInt16>(Max<tInt16>(0, A), 255) << ShiftA
 				);
 				Row[X] = Value;
 			}
@@ -2944,7 +3005,7 @@ namespace Scanline {
 		tNat32  SizeY
 	//=============================================================================
 	) {
-		*State = {};
+		MemZero(State, 1);
 		State->MaxX = SizeX;
 	}
 	
@@ -3012,7 +3073,7 @@ namespace ZCurve {
 		tNat32  SizeY
 	//=============================================================================
 	) {
-		*State = {};
+		MemZero(State, 1);
 	}
 	
 	//=============================================================================
@@ -3076,9 +3137,9 @@ namespace HilbertCurve {
 	using tStack = tNat64;
 	
 	using tState = struct {
-		tStack Stack;
-		tNat32 X;
-		tNat32 Y;
+		tStack Stack = 0;
+		tNat32 X     = 0;
+		tNat32 Y     = 0;
 	};
 	
 	using tStepType = enum {
@@ -3092,7 +3153,7 @@ namespace HilbertCurve {
 		Alpha = 3,
 		Betha = 2,
 		Gamma = 1,
-		End = 0,
+		End   = 0,
 	};
 	
 	using tDirection = enum {
@@ -3126,7 +3187,7 @@ namespace HilbertCurve {
 		tStack* Stack
 	//=============================================================================
 	) {
-		static tNat32 Matrix[] = { D, A, A, B };
+		static tStepType Matrix[] = { D, A, A, B };
 		
 		auto OldStepType = StepType(*Stack);
 		auto OldStepNumber = StepNumber(*Stack);
@@ -3162,7 +3223,7 @@ namespace HilbertCurve {
 	//=============================================================================
 	) {
 		auto Levels = 0;
-		for (auto Temp = SizeX | SizeY; Temp; Temp >>= 1) {
+		for (auto Temp = SizeX | SizeY; Temp != 0; Temp >>= 1) {
 			Levels += 1;
 		}
 		
@@ -3218,7 +3279,7 @@ namespace HilbertCurve {
 				State->X -= 1;
 			} break;
 			default: {
-				ASSERT(false);
+				ASSERT(cFalse);
 			}
 		}
 	}
@@ -3262,28 +3323,28 @@ namespace HilbertCurve {
 		//=============================================================================
 		static inline
 		void Test(
+			tArray<tNat8> Mem
 		//=============================================================================
 		) {
-			const tNat32 Bits = 10;
+			const auto cBits = (tNat8)10;
+			const auto cCount = (tNat32)(1 << (2*cBits));
 			
-			auto Array = (tBool*)malloc(1 << (2*Bits));
-			for (auto I = 1 << (2*Bits); I --> 0;) {
-				Array[I] = false;
-			}
-			Array[0] = true;
+			auto Array = MemAlloc<tBool>(Mem, cCount);
+			MemZero(Array.Values, cCount);
 			
-			tState HilbertState = {};
-			HilbertState.Stack = HilbertCurve::New(Bits);
-			
-			Array[0] = true;
-			
-			for (auto Steps = (1 << (2*Bits)) - 1; Steps --> 0;) {
+			tState HilbertState;
+			MemZero(&HilbertState, 1);
+			HilbertState.Stack = HilbertCurve::New(cBits);
+			for (auto Steps = cCount; Steps --> 0; ) {
+				auto Pos = HilbertState.X | (HilbertState.Y << cBits);
+				ASSERT(!Array[Pos]);
+				Array[Pos] = cTrue;
 				HilbertCurve::Next(&HilbertState);
-				ASSERT(Array[HilbertState.X | (HilbertState.Y << Bits)] == false);
-				Array[HilbertState.X | (HilbertState.Y << Bits)] = true;
 			}
 			
-			free(Array);
+			for (auto I = cCount; I --> 0; ) {
+				ASSERT(Array[I]);
+			}
 		}
 #	endif
 }
@@ -3311,11 +3372,11 @@ namespace HilbertCurve {
 static
 void WriteLayer(
 	ByteStream::tWriter* Stream,
-	tInt16*              DataPtr,
+	tArray<tInt16>       DataPtr,
 	tNat32               SizeX,
 	tNat32               SizeY,
 	tNat32               Pitch,
-	tNat32               Compression
+	tNat8                Compression
 //=============================================================================
 ) {
 	MEASURE_BLOCK(WriteLayer);
@@ -3342,12 +3403,14 @@ void WriteLayer(
 	auto Curve = GetInterface(&CurveState);
 	Init(&Curve, SizeX, SizeY);
 	
-	auto CompressionOffset = (1 << Compression) >> 1;
+	auto CompressionOffset = (tInt16)((1 << Compression) >> 1);
 	
-	tNat32 HistValues[1<<15] = {};
-	tNat32 HistZeros[1<<15] = {};
+	tNat32 HistValues[1<<15];
+	MemZero(HistValues, 1<<15);
+	tNat32 HistZeros[1<<15];
+	MemZero(HistZeros, 1<<15);
 	
-	for (auto I = (tNat32)0; I < SizeX*SizeY;) {
+	for (auto I = (tNat32)0; I < SizeX*SizeY; ) {
 		auto X = GetX(&Curve);
 		auto Y = GetY(&Curve);
 		if (X < SizeX && Y < SizeY) {
@@ -3356,13 +3419,13 @@ void WriteLayer(
 			if (Value == 0) {
 				Zeros += 1;
 			} else {
-				if (Zeros) {
+				if (Zeros > 0) {
 					HistValues[0] += Zeros;
 					HistZeros[UsedBits(Zeros)] += 1;
 				}
 				HistValues[Abs(Value)] += 1;
 				
-				if (Zeros) {
+				if (Zeros > 0) {
 					if (Zeros == 1) {
 						WriteNat(&BitWriterInterface, 0);
 					} else {
@@ -3380,7 +3443,7 @@ void WriteLayer(
 		Next(&Curve);
 	}
 	
-	if (Zeros) {
+	if (Zeros > 0) {
 		HistValues[0] += Zeros;
 		HistZeros[Min<tNat32>(Zeros, (1<<15) - 1)] += 1;
 		if (Zeros == 1) {
@@ -3393,32 +3456,34 @@ void WriteLayer(
 	
 	Close(&BitWriterInterface);
 	
+#	if 1
 	{
 		MEASURE_BLOCK(WriteLayer_ShowHistogram);
 		
 		fprintf(gLogStream, "\n\n");
 		fprintf(gLogStream, "%d x %d\n", SizeX, SizeY);
-		for (auto Value = 0; Value < 1<<15; Value += 1) {
+		for (auto Value = (tNat16)0; Value < 1<<15; Value += 1) {
 			auto Count = HistValues[Value];
 			if (Count > 0) {
 				fprintf(gLogStream, "V %d %d\n", Value, Count);
 			}
 		}
 		fprintf(gLogStream, "--\n");
-		for (auto Repeates = 0; Repeates < 1<<15; Repeates += 1) {
+		for (auto Repeates = (tNat32)0; Repeates < 1<<15; Repeates += 1) {
 			auto Count = HistZeros[Repeates];
 			if (Count > 0) {
 				fprintf(gLogStream, "Z %d %d\n", Repeates, Count);
 			}
 		}
 	}
+#	endif
 }
 
 //=============================================================================
 static
 void ReadLayer(
 	ByteStream::tReader* Stream,
-	tInt16*              DataPtr,
+	tArray<tInt16>       DataPtr,
 	tNat32               SizeX,
 	tNat32               SizeY,
 	tNat32               Pitch
@@ -3436,37 +3501,37 @@ void ReadLayer(
 //	
 //	auto BitReaderInterface = GetInterface(&ABitReader);
 	
-	auto Compression = (tNat32)ReadNat(&BitReaderInterface);
+	auto Compression = (tNat8)ReadNat(&BitReaderInterface);
 	
 	auto Levels = (tNat32)0;
 	for (auto Size = Max(SizeX, SizeY); Size > 0; Size >>= 1) {
 		Levels += 1;
 	}
 	auto Zeros = (tNat64)0;
-	auto WasLastZero = false;
+	auto WasLastZero = cFalse;
 	tCurveState CurveState;
 	auto Curve = GetInterface(&CurveState);
 	Init(&Curve, SizeX, SizeY);
 	
-	for (auto I = (tNat32)0; I < SizeX * SizeY;) {
+	for (auto I = (tNat32)0; I < SizeX * SizeY; ) {
 		auto X = GetX(&Curve);
 		auto Y = GetY(&Curve);
 		if (X < SizeX && Y < SizeY) {
 			I += 1;
-			tInt32 Sign;
+			tInt8 Sign;
 			tNat64 Value;
-			if (Zeros) {
+			if (Zeros > 0) {
 				Zeros -= 1;
 				Sign = 1;
 				Value = 0;
 			} else if (WasLastZero) {
 				Value = ReadNat(&BitReaderInterface);
-				Sign = (Value & 1) ? -1 : 1;
+				Sign = ((Value & 1) == 0) ? 1 : -1;
 				Value >>= 1;
 				Value += 1;
 			} else {
 				Value = ReadNat(&BitReaderInterface);
-				Sign = (Value & 1) ? -1 : 1;
+				Sign = ((Value & 1) == 0) ? 1 : -1;
 				Value >>= 1;
 				if (Value == 0 && Sign == -1) {
 					Zeros = ReadNat(&BitReaderInterface) + 1;
@@ -3485,7 +3550,8 @@ void ReadLayer(
 void EnCode(
 	tStream*             StreamIn,
 	ByteStream::tWriter* StreamOut,
-	tNat32               Compression
+	tNat32               Compression,
+	tArray<tNat8>        Mem
 //=============================================================================
 ) {
 	MEASURE_BLOCK(EnCode);
@@ -3524,16 +3590,12 @@ void EnCode(
 	auto SizeY = (tNat16)BmpInfoHeader.SizeY;
 	
 	Layer::tLevel Layers[4][32];
-	auto LayerCount = 4u;
-	auto BufferSize = 4 * SizeX * SizeY;
-	auto Buffer = (tInt16*)malloc(LayerCount * BufferSize * sizeof(tInt16));
+	auto LayerCount = (tNat16)4;
 	
-	auto InitLevel = 0u;
+	auto InitLevel = (tNat32)0;
 	{
-		auto TempBuffer = Buffer;
-		for (auto Layer = LayerCount; Layer --> 0;) {
-			InitLevel = Layer::Init(&Layers[Layer][0], SizeX, SizeY, TempBuffer, BufferSize);
-			TempBuffer += BufferSize;
+		for (auto Layer = LayerCount; Layer --> 0; ) {
+			InitLevel = Layer::Init(Layers[Layer], SizeX, SizeY, Mem);
 		}
 	}
 	
@@ -3551,8 +3613,8 @@ void EnCode(
 	}
 	
 	// Berechnen
-	for (auto Layer = LayerCount; Layer --> 0;) {
-		for (auto Level = InitLevel; Level --> 0;) {
+	for (auto Layer = LayerCount; Layer --> 0; ) {
+		for (auto Level = InitLevel; Level --> 0; ) {
 			Layer::SplitWithQubPred(&Layers[Layer][Level+1], &Layers[Layer][Level]);
 		}
 	}
@@ -3565,9 +3627,9 @@ void EnCode(
 		WriteNat(&BitWriterInterface, SizeX);
 		WriteNat(&BitWriterInterface, SizeY);
 		
-		for (auto Layer = LayerCount; Layer --> 0;) {
-			auto Value = *Layers[Layer][0].S;
-			WriteBit(&BitWriterInterface, Value < 0);
+		for (auto Layer = LayerCount; Layer --> 0; ) {
+			auto Value = Layers[Layer][0].S[0];
+			WriteBit(&BitWriterInterface, (Value < 0) ? 1 : 0);
 			WriteNat(&BitWriterInterface, Abs(Value));
 			
 			ASSERT(Layers[Layer][0].SizeXLeft == 1);
@@ -3577,11 +3639,11 @@ void EnCode(
 		Close(&BitWriterInterface);
 		
 		for (auto Level = (tNat32)0; Level < InitLevel; Level += 1) {
-			auto SizeXLeft = Layers[0][Level].SizeXLeft;
-			auto SizeXRight = Layers[0][Level].SizeXRight;
-			auto SizeYTop = Layers[0][Level].SizeYTop;
+			auto SizeXLeft   = Layers[0][Level].SizeXLeft;
+			auto SizeXRight  = Layers[0][Level].SizeXRight;
+			auto SizeYTop    = Layers[0][Level].SizeYTop;
 			auto SizeYBottom = Layers[0][Level].SizeYBottom;
-			auto Pitch = Layers[0][Level].Pitch;
+			auto Pitch       = Layers[0][Level].Pitch;
 			
 			ASSERT(SizeXLeft >= SizeXRight);
 			ASSERT(SizeYTop >= SizeYBottom);
@@ -3592,7 +3654,7 @@ void EnCode(
 			for (auto Layer = (tNat32)0; Layer < LayerCount; Layer += 1) {
 				auto LayerTemp = Layers[Layer][Level];
 				
-				auto Compression_ = Max<tInt32>(0, Level - InitLevel + Compression - 2*(Layer == 1));
+				auto Compression_ = (tNat8)Max<tInt32>(0, Level - InitLevel + Compression - 2*(Layer == 1));
 				
 				WriteLayer(StreamOut, LayerTemp.H, SizeXRight, SizeYTop,    Pitch, Compression_);
 				WriteLayer(StreamOut, LayerTemp.V, SizeXLeft,  SizeYBottom, Pitch, Compression_);
@@ -3605,7 +3667,8 @@ void EnCode(
 //=============================================================================
 void DeCode(
 	ByteStream::tReader* StreamIn,
-	tStream*             StreamOut
+	tStream*             StreamOut,
+	tArray<tNat8>        Mem
 //=============================================================================
 ) {
 	MEASURE_BLOCK(DeCode);
@@ -3614,27 +3677,25 @@ void DeCode(
 	BitStream::Init(&BitReader, StreamIn);
 	auto BitReaderInterface = GetInterface(&BitReader);
 	
-	auto SizeX = (tNat32)ReadNat(&BitReaderInterface);
-	auto SizeY = (tNat32)ReadNat(&BitReaderInterface);
+	auto SizeX = (tNat16)ReadNat(&BitReaderInterface);
+	auto SizeY = (tNat16)ReadNat(&BitReaderInterface);
 	
 	Layer::tLevel Layers[4][32];
-	auto LayerCount = 4u;
-	auto InitLevel = 0;
+	auto LayerCount = (tNat8)4;
+	auto InitLevel = (tNat8)0;
 	{
 		auto BufferSize = 4 * SizeX * Max<tNat32>(SizeY, 8);
-		auto Buffer = (tInt16*)malloc(LayerCount * BufferSize * sizeof(tInt16));
+		auto Buffer = MemAlloc<tInt16>(Mem, LayerCount * BufferSize * sizeof(tInt16));
 		
 		{
-			auto TempBuffer = Buffer;
-			for (auto Layer = LayerCount; Layer --> 0;) {
-				InitLevel = Layer::Init(&Layers[Layer][0], SizeX, SizeY, TempBuffer, BufferSize);
-				TempBuffer += BufferSize;
+			for (auto Layer = LayerCount; Layer --> 0; ) {
+				InitLevel = Layer::Init(&Layers[Layer][0], SizeX, SizeY, Mem);
 			}
 		}
 		
-		for (auto Layer = LayerCount; Layer --> 0;) {
-			auto Sign = ReadBit(&BitReaderInterface) ? -1 : 1;
-			*Layers[Layer][0].S = (tInt16)(Sign * ReadNat(&BitReaderInterface));
+		for (auto Layer = LayerCount; Layer --> 0; ) {
+			auto Sign = (tInt16)(ReadBit(&BitReaderInterface) == 1 ? -1 : 1);
+			Layers[Layer][0].S[0] = (tInt16)(Sign * ReadNat(&BitReaderInterface));
 			
 			ASSERT(Layers[Layer][0].SizeXLeft == 1);
 			ASSERT(Layers[Layer][0].SizeYTop == 1);
@@ -3642,7 +3703,7 @@ void DeCode(
 		
 		Close(&BitReaderInterface);
 		
-		for (auto Level = 0; Level < InitLevel; Level += 1) {
+		for (auto Level = (tNat32)0; Level < InitLevel; Level += 1) {
 			auto SizeXLeft = Layers[0][Level].SizeXLeft;
 			auto SizeXRight = Layers[0][Level].SizeXRight;
 			auto SizeYTop = Layers[0][Level].SizeYTop;
@@ -3666,8 +3727,8 @@ void DeCode(
 	}
 	
 	{ // Berechnen
-		for (auto Layer = LayerCount; Layer --> 0;) {
-			for (auto Level = 0; Level < InitLevel; Level += 1) {
+		for (auto Layer = LayerCount; Layer --> 0; ) {
+			for (auto Level = (tNat16)0; Level < InitLevel; Level += 1) {
 				Layer::ComposeWithQubPred(&Layers[Layer][Level], &Layers[Layer][Level+1]);
 			}
 		}
@@ -3704,24 +3765,34 @@ void DeCode(
 			exit(-1);
 		}
 		
-		BmpHelper::PutLayerToBmp32(StreamOut, BmpInfoHeader, &Layers[0][InitLevel], &Layers[1][InitLevel], &Layers[2][InitLevel], &Layers[3][InitLevel]);
+		BmpHelper::PutLayerToBmp32(
+			StreamOut,
+			BmpInfoHeader,
+			&Layers[0][InitLevel],
+			&Layers[1][InitLevel],
+			&Layers[2][InitLevel],
+			&Layers[3][InitLevel]
+		);
 	}
 }
 
 #ifdef TEST
-	static inline
 	//=============================================================================
+	static inline
 	void Test(
+		tArray<tNat8> Mem
 	//=============================================================================
 	) {
 		TestArray();
 		HaarWavelet::Test();
-		HilbertCurve::Test();
+		HilbertCurve::Test(Mem);
 		FibonacciCode::Test();
 		Huffman::Test();
-		Layer::Test();
+		Layer::Test(Mem); 
 	}
 #endif
+
+tNat8 gMem[1<<25];
 
 //=============================================================================
 int main(
@@ -3735,10 +3806,12 @@ int main(
 	
 	FibonacciCode::Init(FibonacciCode::gFibArray, _countof(FibonacciCode::gFibArray));
 	
+	tArray<tNat8> Mem = AsArray(gMem);
+	
 #	ifdef TEST
 		if (ArgCount > 1 && strncmp(Args[1], "-t", 2) == 0) {
 			
-			Test();
+			Test(Mem);
 			if (ArgCount == 2) {
 				exit(0);
 			}
@@ -3780,10 +3853,10 @@ int main(
 		BufferdStream::Init(&BufferdStreamOut, StreamOut);
 		auto x = ByteStream::Writer(
 			&BufferdStreamOut,
-			[] (void* Env, tNat32 Byte) { BufferdStream::WriteByte((BufferdStream::tWriter*)Env, Byte); },
+			[] (void* Env, tNat8 Byte) { BufferdStream::WriteByte((BufferdStream::tWriter*)Env, Byte); },
 			[] (void* Env) { BufferdStream::Close((BufferdStream::tWriter*)Env); }
 		);
-		EnCode(StreamIn, &x, atoi(&Flag[2]));
+		EnCode(StreamIn, &x, atoi(&Flag[2]), Mem);
 		BufferdStream::Close(&BufferdStreamOut);
 	} else
 	if (strncmp(Flag, "-d", 2) == 0) {
@@ -3794,8 +3867,11 @@ int main(
 			[] (void* Env) { return BufferdStream::ReadByte((BufferdStream::tReader*)Env); },
 			[] (void* Env) { BufferdStream::Close((BufferdStream::tReader*)Env); }
 		);
-		DeCode(&x, StreamOut);
+		DeCode(&x, StreamOut, Mem);
 		BufferdStream::Close(&BufferdStreamIn);
+	} else {
+		fprintf(gLogStream, "ERROR: unknown arg %s!!!", Flag);
+		exit(-1);
 	}
 	
 	STOP_CLOCK(main);
