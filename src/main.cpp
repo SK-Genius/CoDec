@@ -11,6 +11,12 @@
 #	define LL "I64"
 #endif
 
+#ifdef TEST
+#	ifndef DEBUG
+#		define DEBUG
+#	endif
+#endif
+
 // TODO-List:
 // ==========
 // - Huffman vs Fibonacci
@@ -58,8 +64,12 @@ static tStream* gLogStream = NULL;
 #endif
 
 #ifdef DEBUG
-#	define TEST
-#	define TIMER
+#	ifndef TEST
+#		define TEST
+#	endif
+#	ifndef TIMER
+#		define TIMER
+#	endif
 	
 #	define ASSERT(Cond) Debug::Assert((Cond), __FILE__, __LINE__);
 	
@@ -76,7 +86,14 @@ static tStream* gLogStream = NULL;
 			if (!Cond) {
 				fprintf(gLogStream, "ERROR %s:%d", FileName, LineNr);
 				fflush(gLogStream);
+#				ifndef VS
+#					pragma GCC diagnostic push
+#					pragma GCC diagnostic ignored "-Wdiv-by-zero"
+#				endif
 				fprintf(gLogStream, "%d", LineNr / 0);
+#				ifndef VS
+#					pragma GCC diagnostic pop
+#				endif
 			}
 		}
 		
@@ -180,7 +197,7 @@ tArray<g> Take(
 	tNat32    Count
 //=============================================================================
 ) {
-	Array.Size = Min<g>(Array.Size, Count);
+	Array.Size = Min(Array.Size, Count);
 	return Array;
 }
 
@@ -192,7 +209,7 @@ tArray<g> Skip(
 	tNat32    Count
 //=============================================================================
 ) {
-	auto Delta = Min<g>(Array.Size, Count);
+	auto Delta = Min(Array.Size, Count);
 	Array.Values += Delta;
 	Array.Size   -= Delta;
 	return Array;
@@ -308,7 +325,7 @@ void InPlaceQuickSort(
 #endif
 
 #ifdef TIMER
-#	define MEASURE_BLOCK(ClockId) Clock::tMeasure aClockId(Clock::Id::ClockId);
+#	define MEASURE_BLOCK(ClockId) Clock::tMeasure ClockId(Clock::Id::ClockId);
 #	define START_CLOCK(ClockId) Clock::Start(Clock::Id::ClockId);
 #	define STOP_CLOCK(ClockId) Clock::Stop(Clock::Id::ClockId);
 #	define PRINT_CLOCKS(Stream) Clock::print((Stream));
@@ -1445,13 +1462,6 @@ namespace FibonacciCode {
 }
 
 namespace Huffman {
-	// TODO: Sorting
-	using tCount_NodeIndex = struct {
-		tNat32 Count;
-		tNat32 NodeIndex;
-	};
-	
-	// TODO: why i need r eferences ??? (compiler bug?)
 	//=============================================================================
 	static inline
 	void CalculateBitCount(
@@ -1518,7 +1528,7 @@ namespace Huffman {
 	//=============================================================================
 	static inline
 	void CalculateBits(
-		tArray<tNat8>& BitCounts,
+		tArray<tNat8>&  BitCounts,
 		tArray<tNat32>& BitsArray  // OUT
 	//=============================================================================
 	) {
@@ -1533,6 +1543,57 @@ namespace Huffman {
 			
 			Bits += 1;
 		}
+	}
+	
+	using tCount_NodeIndex = struct {
+		tNat32 Count;
+		tNat32 NodeIndex;
+	};
+	
+	//=============================================================================
+	static inline
+	void Init(
+		tArray<tNat32>& Counts,
+		tArray<tNat8>&  BitCounts, // Out
+		tArray<tNat32>& BitsArray  // OUT
+	//=============================================================================
+	) {
+		auto Count = Counts.Size;
+		auto SortedCounts = HeapAlloc<tNat32>(Count);
+		auto SortedIndex = HeapAlloc<tNat32>(Count);
+		{
+			auto ForSortArray = HeapAlloc<tCount_NodeIndex>(Count);
+			for (auto I = Count; I --> 0; ) {
+				ForSortArray[Count].Count = Counts[Count];
+				ForSortArray[Count].NodeIndex = Count;
+			}
+			InPlaceQuickSort(
+				ForSortArray,
+				(tFunc2<tCount_NodeIndex, tCount_NodeIndex, tInt32> *) [](tCount_NodeIndex A, tCount_NodeIndex B) {
+					return Sign(A.Count > B.Count);
+				}
+			);
+			for (auto I = Count; I --> 0; ) {
+				SortedCounts[I] = ForSortArray[Count].Count;
+				SortedIndex[I] = ForSortArray[Count].NodeIndex;
+			}
+			HeapFree(ForSortArray);
+		}
+		{
+			auto SortedBitCounts = HeapAlloc<tNat8>(Count);
+			auto SortedBitsArray = HeapAlloc<tNat32>(Count);
+			CalculateBitCount(SortedCounts, SortedBitCounts);
+			CalculateBits(SortedBitCounts, SortedBitsArray);
+			for (auto I = Count; I --> 0; ) {
+				auto J = SortedIndex[I];
+				BitCounts[J] = SortedBitCounts[I];
+				BitsArray[J] = SortedBitsArray[I];
+			}
+			HeapFree(SortedBitsArray);
+			HeapFree(SortedBitCounts);
+		}
+		HeapFree(SortedCounts);
+		HeapFree(SortedIndex);
 	}
 	
 	using tWriter = struct {
@@ -1686,21 +1747,18 @@ namespace Huffman {
 			tArray<tNat32> InHistogramm = AsArray(Histogram);
 			
 			{
-				tArray<tNat8>  OutCounts    = AsArray(BitCountsRes);
+				tArray<tNat8> OutCounts = AsArray(BitCountsRes);
 				CalculateBitCount(InHistogramm, OutCounts);
 				for (auto I = _countof(Histogram); I --> 0;) {
 					ASSERT(BitCountsRes[I] == BitCountsRef[I]);
 				}
 				
-				tArray<tNat32> OutBits      = AsArray(BitsRes);
+				tArray<tNat32> OutBits = AsArray(BitsRes);
 				CalculateBits(OutCounts, OutBits);
 				for (auto I = _countof(Histogram); I --> 0;) {
 					ASSERT(BitsRes[I] == BitsRef[I]);
 				}
 			}
-			
-			auto BitCount = (tNat32)0;
-			tNat32 In[] = { 0, 1, 2, 3, 4, 5, 6, 7};
 			
 			auto Bytes = HeapAlloc<tNat8>(1<<10);
 			{
