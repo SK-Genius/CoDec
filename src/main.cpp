@@ -1203,7 +1203,7 @@ namespace ArithmeticBitStream {
 	
 	//=============================================================================
 	static inline
-	tNat32 ReadBit(
+	tNat1 ReadBit(
 		tReader* Stream
 	//=============================================================================
 	) {
@@ -1268,7 +1268,7 @@ namespace ArithmeticBitStream {
 			Stream->Range -= Delta;
 		}
 		
-		return Bit;
+		return (tNat1)Bit;
 	}
 	
 	//=============================================================================
@@ -2879,9 +2879,59 @@ namespace BmpHelper {
 	
 	//=============================================================================
 	static
+	void PutBmp32Header(
+		tStream* StreamOut,
+		tNat32   SizeX,
+		tNat32   SizeY
+	//=============================================================================
+	) {
+		tChar8 MagicString[2];
+		MagicString[0] = 'B';
+		MagicString[1] = 'M';
+		if (!fwrite(&MagicString, sizeof(MagicString), 1, StreamOut)) {
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
+			exit(-1);
+		}
+		
+		BmpHelper::tFileHeader BmpFileHeader = {};
+		BmpFileHeader.Offset = sizeof(MagicString) + sizeof(BmpHelper::tFileHeader) + sizeof(BmpHelper::tInfoHeader);
+		ASSERT(BmpFileHeader.Offset == 54);
+		BmpFileHeader.Size = BmpFileHeader.Offset + 12 + 4*SizeX*SizeY;
+		if (!fwrite(&BmpFileHeader, sizeof(BmpFileHeader), 1, StreamOut)) {
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
+			exit(-1);
+		}
+		
+		BmpHelper::tInfoHeader BmpInfoHeader = {};
+		BmpInfoHeader.BitCount = 32;
+		BmpInfoHeader.Compression = 3;
+		BmpInfoHeader.SizeX = SizeX;
+		BmpInfoHeader.SizeY = SizeY;
+		BmpInfoHeader.HeaderSize = sizeof(BmpInfoHeader);
+		ASSERT(BmpInfoHeader.HeaderSize == 40);
+		BmpInfoHeader.SizeImage = 4*SizeX*SizeY;
+		if (!fwrite(&BmpInfoHeader, sizeof(BmpInfoHeader), 1, StreamOut)) {
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
+			exit(-1);
+		}
+		
+		tNat32 Mask[3] = {
+			0x00FF0000u, // R
+			0x0000FF00u, // G
+			0x000000FFu  // B
+		};
+		if (!fwrite(&Mask, sizeof(Mask), 1, StreamOut)) {
+			fprintf(gLogStream, "ERROR: fail writing to output!!!");
+			exit(-1);
+		}
+	}
+	
+	//=============================================================================
+	static
 	void PutLayerToBmp32(
 		tStream*       StreamOut,
-		tInfoHeader    BmpInfoHeader,
+		tNat32         SizeX,
+		tNat32         SizeY,
 		Layer::tLevel* LayerA,
 		Layer::tLevel* LayerY,
 		Layer::tLevel* LayerCg,
@@ -2890,31 +2940,21 @@ namespace BmpHelper {
 	) {
 		MEASURE_BLOCK(PutLayerToBmp32);
 		
-		tNat32 Mask[3] = {
-			0x00FF0000u, // R
-			0x0000FF00u, // G
-			0x000000FFu  // B
-		};
-		auto MaskR = Mask[0];
-		auto MaskG = Mask[1];
-		auto MaskB = Mask[2];
+		auto MaskR = 0x00FF0000u;
+		auto MaskG = 0x0000FF00u;
+		auto MaskB = 0x000000FFu;
 		auto MaskA = ~(MaskR | MaskG | MaskB);
-		if (!fwrite(&Mask, sizeof(Mask), 1, StreamOut)) {
-			fprintf(gLogStream, "ERROR: fail writing to output!!!");
-			exit(-1);
-		}
 		
 		auto ShiftA = GetShift(MaskA);
 		auto ShiftR = GetShift(MaskR);
 		auto ShiftG = GetShift(MaskG);
 		auto ShiftB = GetShift(MaskB);
 		
-		auto SizeX = BmpInfoHeader.SizeX;
 		auto Pitch = LayerA->Pitch;
 		auto RowSize = (tSize)(4*SizeX);
 		auto Row = (tNat32*)malloc(RowSize);
-		ASSERT(BmpInfoHeader.SizeY > 0); // TODO: allow negative SizeY
-		for (auto Y = (tNat32)0; Y < (tNat32)BmpInfoHeader.SizeY; Y += 1) {
+		ASSERT(SizeY > 0); // TODO: allow negative SizeY
+		for (auto Y = (tNat32)0; Y < (tNat32)SizeY; Y += 1) {
 			for (auto X = (tNat32)0; X < SizeX; X += 1) {
 				auto J = (tNat32)(Y*Pitch + X);
 				
@@ -3456,7 +3496,7 @@ void WriteLayer(
 	
 	Close(&BitWriterInterface);
 	
-#	if 1
+#	if 0
 	{
 		MEASURE_BLOCK(WriteLayer_ShowHistogram);
 		
@@ -3586,16 +3626,13 @@ void EnCode(
 		exit(-1);
 	}
 	
-	auto SizeX = (tNat16)BmpInfoHeader.SizeX;
-	auto SizeY = (tNat16)BmpInfoHeader.SizeY;
-	
 	Layer::tLevel Layers[4][32];
 	auto LayerCount = (tNat16)4;
 	
 	auto InitLevel = (tNat32)0;
 	{
 		for (auto Layer = LayerCount; Layer --> 0; ) {
-			InitLevel = Layer::Init(Layers[Layer], SizeX, SizeY, Mem);
+			InitLevel = Layer::Init(Layers[Layer], (tNat16)BmpInfoHeader.SizeX, (tNat16)BmpInfoHeader.SizeY, Mem);
 		}
 	}
 	
@@ -3619,7 +3656,91 @@ void EnCode(
 		}
 	}
 	
+#	ifdef DEBUG
+	{
+		for (auto Layer = LayerCount; Layer --> 0; ) {
+			for (auto Level = InitLevel - 1; Level --> 0; ) {
+				for (auto Part = 0; Part < 3; Part += 1) {
+					auto LayerPtr = &Layers[Layer][Level+1];
+					auto Pitch = LayerPtr->Pitch;
+					tNat16 SizeX = 0;
+					tNat16 SizeY = 0;
+					tArray<tInt16> Data = {};
+					auto Mode = '_';
+					switch (Part) {
+						case 0: {
+							Mode = 'H';
+							Data = LayerPtr->H;
+							SizeX = LayerPtr->SizeXRight;
+							SizeY = LayerPtr->SizeYTop;
+						} break;
+						
+						case 1: {
+							Mode = 'V';
+							Data = LayerPtr->V;
+							SizeX = LayerPtr->SizeXLeft;
+							SizeY = LayerPtr->SizeYBottom;
+						} break;
+						
+						case 2: {
+							Mode = 'D';
+							Data = LayerPtr->D;
+							SizeX = LayerPtr->SizeXRight;
+							SizeY = LayerPtr->SizeYBottom;
+						} break;
+						
+						default: ASSERT(false);
+					}
+					char str[] = {
+						(char)('0' + (Level / 10) % 10),
+						(char)('0' + (Level /  1) % 10),
+						'_',
+						(char)('0' + (Layer / 10) % 10),
+						(char)('0' + (Layer /  1) % 10),
+						'_',
+						Mode,
+						'.',
+						'b',
+						'm',
+						'p',
+						'\0'
+					};
+					
+					auto StreamOut = fopen(str, "wb");
+					
+					BmpHelper::PutBmp32Header(StreamOut, SizeX, SizeY);
+					
+					auto RowSize = 4 * SizeY;
+					auto Row = (tNat32*)malloc(RowSize);
+					for (auto Y = (tNat32)0; Y < (tNat32)SizeY; Y += 1) {
+						for (auto X = (tNat32)0; X < SizeX; X += 1) {
+							auto Value = Data[X + Y*Pitch] << 0;
+							
+							auto R = (tInt16)(-Value);
+							auto G = (tInt16)(Value);
+							auto B = (tInt16)((Abs(Value) > 0xFF) ? 0xFF : 0);
+							
+							Row[X] = (
+								((tInt32)((Min<tInt16>(Max<tInt16>(0, R), 0xFF)) << 16)) |
+								((tInt32)((Min<tInt16>(Max<tInt16>(0, G), 0xFF)) <<  8)) |
+								((tInt32)((Min<tInt16>(Max<tInt16>(0, B), 0xFF)) <<  0))
+							);
+						}
+						fwrite(Row, RowSize, 1, StreamOut);
+					}
+					
+					auto fclose(StreamOut);
+				}
+			}
+		}
+	}
+#	endif
+	
 	{ // Output
+		auto InitLevelPtr = &Layers[0][InitLevel];
+		auto SizeX = InitLevelPtr->SizeXLeft;
+		auto SizeY = InitLevelPtr->SizeYTop;
+
 		BitStream::tWriter BitWriter;
 		BitStream::Init(&BitWriter, StreamOut);
 		auto BitWriterInterface = GetInterface(&BitWriter);
@@ -3735,39 +3856,11 @@ void DeCode(
 	}
 	
 	{ // Output
-		tChar8 MagicString[2];
-		MagicString[0] = 'B';
-		MagicString[1] = 'M';
-		if (!fwrite(&MagicString, sizeof(MagicString), 1, StreamOut)) {
-			fprintf(gLogStream, "ERROR: fail writing to output!!!");
-			exit(-1);
-		}
-		
-		BmpHelper::tFileHeader BmpFileHeader = {};
-		BmpFileHeader.Offset = sizeof(MagicString) + sizeof(BmpHelper::tFileHeader) + sizeof(BmpHelper::tInfoHeader);
-		ASSERT(BmpFileHeader.Offset == 54);
-		BmpFileHeader.Size = BmpFileHeader.Offset + 12 + 4*SizeX*SizeY;
-		if (!fwrite(&BmpFileHeader, sizeof(BmpFileHeader), 1, StreamOut)) {
-			fprintf(gLogStream, "ERROR: fail writing to output!!!");
-			exit(-1);
-		}
-		
-		BmpHelper::tInfoHeader BmpInfoHeader = {};
-		BmpInfoHeader.BitCount = 32;
-		BmpInfoHeader.Compression = 3;
-		BmpInfoHeader.SizeX = SizeX;
-		BmpInfoHeader.SizeY = SizeY;
-		BmpInfoHeader.HeaderSize = sizeof(BmpInfoHeader);
-		ASSERT(BmpInfoHeader.HeaderSize == 40);
-		BmpInfoHeader.SizeImage = 4*SizeX*SizeY;
-		if (!fwrite(&BmpInfoHeader, sizeof(BmpInfoHeader), 1, StreamOut)) {
-			fprintf(gLogStream, "ERROR: fail writing to output!!!");
-			exit(-1);
-		}
-		
+		BmpHelper::PutBmp32Header(StreamOut, SizeX, SizeY);
 		BmpHelper::PutLayerToBmp32(
 			StreamOut,
-			BmpInfoHeader,
+			SizeX,
+			SizeY,
 			&Layers[0][InitLevel],
 			&Layers[1][InitLevel],
 			&Layers[2][InitLevel],
@@ -3842,8 +3935,8 @@ int main(
 		auto FileInName = Args[3];
 		
 		StreamOut = fopen(FileInName, "wb");
-		if (!StreamIn) {
-			fprintf(gLogStream, "ERROR: File '%s' not found!!!", FileInName);
+		if (!StreamOut) {
+			fprintf(gLogStream, "ERROR: Can't open/create File '%s'!!!", FileInName);
 			exit(-1);
 		}
 	}
